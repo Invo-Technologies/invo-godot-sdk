@@ -1,5 +1,7 @@
 # INVO Network — Godot Plugin
 
+[![CI](https://github.com/Invo-Technologies/invo-godot-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/Invo-Technologies/invo-godot-sdk/actions/workflows/ci.yml)
+
 First-party-style **Godot 4.x** plugin for [INVO Network](https://docs.invo.network/) — cross-game virtual currency: real-money currency purchase (hosted checkout), item purchase, player-to-player **sends & transfers**, balances, pending-collect, and claim codes. The Godot counterpart of INVO's Unity, Unreal, [web (npm)](https://www.npmjs.com/package/@invonetwork/web-sdk) and [Python (PyPI)](https://pypi.org/project/invonetwork/) SDKs, ported from the v2.4.1 API surface.
 
 ## Install
@@ -58,9 +60,38 @@ Every call returns an `InvoResult` (`ok` / `data` / `error: InvoError`). `InvoEr
 
 With no credentials configured, debug builds fall back to an **offline mock** so you can try the UI immediately; wire real credentials in the dock when ready.
 
-## What stays on your backend
+## Production integration
 
-Webhook verification (`purchase.completed`, `item.purchased`, `transfer.claim_pending` — HMAC-SHA256), production token minting, and passkey (WebAuthn) ceremonies — passkeys are a browser capability, so approve/claim ceremonies hand off to INVO's hosted pages / your web companion, exactly as the Unity/Unreal plugins do.
+In production the game holds only a player token, so the client mode covers the **reads** (balance, destinations, pending-collect) and login. The **actions** — checkout creation, item purchase, sends, claims — run on your backend with the game secret, exactly like the Unity/Unreal plugins. The wallet panel's buy/claim/send buttons therefore work out of the box in sandbox mode only; in production, route those actions through your own endpoints (pattern below) or hand off to INVO's hosted pages.
+
+Your backend needs two endpoints (sketch, Python server SDK — the JS SDK is equivalent):
+
+```python
+from invonetwork import InvoServer
+server = InvoServer(game_secret=os.environ["INVO_GAME_SECRET"], environment="production")
+
+@app.post("/invo/token")                     # <- invonetwork/config/player_token_endpoint
+def mint_token():
+    player = authenticate_session(request)   # YOUR session auth — never mint blind
+    minted = server.mint_player_token(player.email)
+    return {"token": minted["token"], "identity_id": minted["identity_id"]}
+
+@app.post("/invo/webhook")
+def webhook():                               # source of truth for crediting/granting
+    event = server.verify_webhook(request.data, request.headers)  # HMAC-SHA256
+    if event["type"] in ("purchase.completed", "item.purchased"):
+        credit_or_grant(event)               # server-side, never off the client response
+    return "", 204
+```
+
+Point `invonetwork/config/player_token_endpoint` at `/invo/token`, call `Invo.login_via_backend()`, and client mode is live — token re-mint on expiry is wired automatically.
+
+## Not included (and why)
+
+- **Webhook verification** — webhooks terminate on your backend; verify and credit there (see above). A game client can't hold the HMAC secret.
+- **Passkey (WebAuthn) ceremonies** — a browser capability. Approve/claim ceremonies hand off to INVO's hosted pages / your web companion.
+- **Production checkout/purchase/send/claim calls** — require the game secret, which never ships in a build; client mode deliberately has no endpoints for them.
+- **Steam in-client purchase rail** — dedicated endpoints, not yet ported (`purchase_currency` rejects `rail="steam"` with guidance). On the roadmap.
 
 ## Transport semantics (ported from the official SDKs)
 
@@ -78,6 +109,10 @@ godot --headless --script res://tests/run_tests.gd
 ## Status / roadmap
 
 - [x] Full server-API port (sandbox direct mode), player-token client mode, retry/error parity, mock transport, wallet UI, editor dock
+- [x] CI (headless test suite on every push) and tagged releases
+- [ ] End-to-end verification against the live sandbox (all tests currently run against the mock transport)
+- [ ] Verified minimum Godot version (CI currently proves 4.7 only)
+- [ ] Sample backend companion (token mint + webhook, Python/JS)
 - [ ] Steam in-client purchase rail
 - [ ] C# bindings
 - [ ] Asset Library listing
