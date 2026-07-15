@@ -23,6 +23,14 @@ func _init(http: InvoHttp, game_secret: String) -> void:
 	_auth = {"X-Game-Secret-Key": game_secret}
 
 
+## A collision-safe client_request_id / idempotency key (128 bits of CSPRNG).
+## Do NOT derive keys from timestamps or frame counters — Time.get_ticks_msec()
+## restarts at 0 every run, so two sessions can silently deduplicate each
+## other's money movements.
+static func new_client_request_id() -> String:
+	return "godot-" + Crypto.new().generate_random_bytes(16).hex_encode()
+
+
 # ---- Token ----
 
 ## Mint a short-lived, game-scoped player token (a SESSION mint for a player
@@ -209,6 +217,9 @@ func purchase_currency(player_email: String, usd_amount: Variant,
 
 ## Complete the card-rail 3-D Secure step. Keyed by payment_intent_id — idempotent.
 func confirm_payment(payment_intent_id: String, order_id: String = "") -> InvoResult:
+	if not InvoValidate.is_present(payment_intent_id):
+		return _fail(InvoError.invalid_input(
+				"paymentIntentId", payment_intent_id, "is required"))
 	var body: Dictionary = {"payment_intent_id": payment_intent_id}
 	if not order_id.is_empty():
 		body["order_id"] = order_id
@@ -480,6 +491,13 @@ func verify_sms_send(transaction_id: String, sms_pin: String) -> InvoResult:
 func claim_transfer(claim_code: String, target_player_name: String,
 		target_player_email: String, target_player_phone: String,
 		target_currency_id: Variant, target_player_id: Variant = null) -> InvoResult:
+	var input_err: InvoError = _claim_problem(claim_code, target_player_name,
+			target_player_email, target_player_phone)
+	if input_err != null:
+		return _fail(input_err)
+	if target_currency_id == null or str(target_currency_id).strip_edges().is_empty():
+		return _fail(InvoError.invalid_input(
+				"targetCurrencyId", target_currency_id, "is required"))
 	var body: Dictionary = {
 		"claim_code": claim_code,
 		"target_player_name": target_player_name,
@@ -498,6 +516,10 @@ func claim_transfer(claim_code: String, target_player_name: String,
 func claim_currency(claim_code: String, receiver_player_name: String,
 		receiver_player_email: String, receiver_player_phone: String,
 		receiver_player_id: Variant = null) -> InvoResult:
+	var input_err: InvoError = _claim_problem(claim_code, receiver_player_name,
+			receiver_player_email, receiver_player_phone)
+	if input_err != null:
+		return _fail(input_err)
 	var body: Dictionary = {
 		"claim_code": claim_code,
 		"receiver_player_name": receiver_player_name,
@@ -639,6 +661,21 @@ static func _initiate_problem(client_request_id: String, player_name: String,
 	if receiver_err != null:
 		return receiver_err
 	return InvoValidate.money_problem(amount, InvoValidate.MAX_ITEM_PRICE, "amount")
+
+
+## Shared validation for the claim-by-code calls (the backend requires all
+## four and keys the receiving identity off an E.164 phone).
+static func _claim_problem(claim_code: String, player_name: String,
+		player_email: String, player_phone: String) -> InvoError:
+	var required: Dictionary = {
+		"claimCode": claim_code,
+		"playerName": player_name,
+		"playerEmail": player_email,
+	}
+	for label: String in required:
+		if not InvoValidate.is_present(required[label]):
+			return InvoError.invalid_input(label, required[label], "is required")
+	return InvoValidate.e164_problem(player_phone, "playerPhone")
 
 
 static func _fail(err: InvoError) -> InvoResult:

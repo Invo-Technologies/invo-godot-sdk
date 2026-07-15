@@ -29,8 +29,13 @@ func _run_all() -> void:
 	await _test_token_refresh()
 	await _test_empty_token_fast_fail()
 	await _test_initiate_validation()
+	await _test_claim_validation()
+	await _test_confirm_payment_validation()
+	await _test_by_email_redaction()
+	await _test_setup_rejects_bad_override()
 	_test_header_sanitization()
 	_test_large_value_decimal_bug()
+	_test_request_id_generation()
 	print("\n[tests] %d passed, %d failed" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
 
@@ -265,6 +270,77 @@ func _test_initiate_validation() -> void:
 			"r3", "P", "p@example.com", "+15555550100", "+15555550101", 7, "10.00")
 	_check(good.ok and state["attempts"] == 1, "valid initiate reaches the wire")
 	http.queue_free()
+
+
+func _test_claim_validation() -> void:
+	var state: Dictionary = {"attempts": 0}
+	var http: InvoHttp = _make_http(func(_m: String, _u: String, _h: Dictionary,
+			_b: Variant) -> Dictionary:
+		state["attempts"] += 1
+		return {"status": 200, "headers": {}, "body": {"status": "claimed"}})
+	var server: InvoSandboxServer = InvoSandboxServer.new(http, "secret")
+	var no_code: InvoResult = await server.claim_currency("", "P", "p@example.com", "+15555550100")
+	_check(not no_code.ok and no_code.error.code == "INVALID_INPUT" and state["attempts"] == 0,
+			"claim_currency rejects empty claim code before the wire")
+	var bad_phone: InvoResult = await server.claim_currency("CODE1", "P", "p@example.com", "5550100")
+	_check(not bad_phone.ok and bad_phone.error.code == "INVALID_INPUT" and state["attempts"] == 0,
+			"claim_currency rejects non-E.164 phone")
+	var no_currency: InvoResult = await server.claim_transfer(
+			"CODE1", "P", "p@example.com", "+15555550100", null)
+	_check(not no_currency.ok and no_currency.error.code == "INVALID_INPUT"
+			and state["attempts"] == 0, "claim_transfer rejects missing target currency id")
+	var good: InvoResult = await server.claim_currency(
+			"CODE1", "P", "p@example.com", "+15555550100")
+	_check(good.ok and state["attempts"] == 1, "valid claim reaches the wire")
+	http.queue_free()
+
+
+func _test_confirm_payment_validation() -> void:
+	var state: Dictionary = {"attempts": 0}
+	var http: InvoHttp = _make_http(func(_m: String, _u: String, _h: Dictionary,
+			_b: Variant) -> Dictionary:
+		state["attempts"] += 1
+		return {"status": 200, "headers": {}, "body": {}})
+	var server: InvoSandboxServer = InvoSandboxServer.new(http, "secret")
+	var res: InvoResult = await server.confirm_payment("")
+	_check(not res.ok and res.error.code == "INVALID_INPUT" and state["attempts"] == 0,
+			"confirm_payment rejects empty payment_intent_id before the wire")
+	http.queue_free()
+
+
+func _test_by_email_redaction() -> void:
+	var http: InvoHttp = _make_http(func(_m: String, _u: String, _h: Dictionary,
+			_b: Variant) -> Dictionary:
+		return {"status": 200, "headers": {}, "body": {"balances": []}})
+	var seen: Dictionary = {"url": ""}
+	http.request_completed.connect(func(_m: String, u: String, _s: int, _a: int) -> void:
+		seen["url"] = u)
+	var server: InvoSandboxServer = InvoSandboxServer.new(http, "secret")
+	await server.get_player_balance("secret-player@example.com")
+	_check(not (seen["url"] as String).contains("secret-player")
+			and (seen["url"] as String).ends_with("/by-email/<redacted>"),
+			"player email redacted from the by-email path in signals")
+	http.queue_free()
+
+
+func _test_setup_rejects_bad_override() -> void:
+	var invo: Node = (load("res://addons/invonetwork/invo.gd") as GDScript).new()
+	root.add_child(invo)
+	await process_frame  # let _ready configure the default sandbox environment
+	invo.setup("production", "game-1")
+	print("  (an ERROR about ftp:// below is expected)")
+	invo.setup("sandbox", "game-2", "ftp://evil.example")
+	_check(invo.environment == "production" and invo.game_id == "game-1",
+			"failed setup() leaves the previous configuration intact")
+	invo.queue_free()
+
+
+func _test_request_id_generation() -> void:
+	var a: String = InvoSandboxServer.new_client_request_id()
+	var b: String = InvoSandboxServer.new_client_request_id()
+	_check(a.begins_with("godot-") and a.length() == 6 + 32,
+			"client request id is godot- + 32 hex chars")
+	_check(a != b, "client request ids are unique")
 
 
 func _test_header_sanitization() -> void:

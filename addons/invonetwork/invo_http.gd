@@ -19,7 +19,7 @@ signal request_errored(method: String, url: String, error: InvoError, will_retry
 const DEFAULT_TIMEOUT: float = 30.0
 const MAX_RETRY_AFTER: float = 20.0
 const RETRIABLE_STATUS: Array[int] = [429, 500, 502, 503, 504]
-const USER_AGENT: String = "invonetwork-godot-sdk/0.2.0 (+https://invo.network)"
+const USER_AGENT: String = "invonetwork-godot-sdk/0.3.0 (+https://invo.network)"
 
 var base_url: String = ""
 var timeout: float = DEFAULT_TIMEOUT
@@ -97,10 +97,14 @@ static func sanitize_header_value(value: String) -> String:
 	return out
 
 
+static func _is_absolute_url(path: String) -> bool:
+	return path.begins_with("https://") or path.begins_with("http://")
+
+
 func _request(method: String, path: String, body: Variant,
 		auth_headers: Dictionary, idempotent: bool) -> InvoResult:
-	var url: String = path if path.begins_with("http") else base_url + path
-	if base_url.is_empty() and not path.begins_with("http"):
+	var url: String = path if _is_absolute_url(path) else base_url + path
+	if base_url.is_empty() and not _is_absolute_url(path):
 		return InvoResult.failure(InvoError.make(
 				"InvoHttp is not configured (no base URL).", "NOT_CONFIGURED", 0))
 	var headers: Dictionary = {"Accept": "application/json", "User-Agent": USER_AGENT}
@@ -111,7 +115,7 @@ func _request(method: String, path: String, body: Variant,
 		headers["Content-Type"] = "application/json"
 		body_text = JSON.stringify(body)
 	# PII rule: never emit query strings (they can carry emails/phones).
-	var loggable_url: String = url.split("?", true, 1)[0]
+	var loggable_url: String = _redact_url(url)
 
 	var attempt: int = 0
 	while true:
@@ -208,6 +212,16 @@ func _run_transport(method: String, url: String, headers: Dictionary,
 		var json: JSON = JSON.new()
 		parsed = text if json.parse(text) != OK else json.data
 	return {"status": status, "headers": header_map, "body": parsed}
+
+
+## The signal-safe form of a URL: no query string, and the by-email path
+## parameter (the one route that carries an email in the PATH) redacted.
+static func _redact_url(url: String) -> String:
+	var out: String = url.split("?", true, 1)[0]
+	var idx: int = out.find("/by-email/")
+	if idx != -1:
+		out = out.substr(0, idx) + "/by-email/<redacted>"
+	return out
 
 
 func _backoff(attempt: int) -> float:

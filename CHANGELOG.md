@@ -2,6 +2,41 @@
 
 All notable changes to the INVO Godot SDK. Versioning follows [SemVer](https://semver.org/); the API surface tracks the INVO backend and mirrors the [web (npm)](https://www.npmjs.com/package/@invonetwork/web-sdk) and [Python (PyPI)](https://pypi.org/project/invonetwork/) SDKs (currently v2.4.1 parity).
 
+## [0.3.0] — 2026-07-15
+
+Second audit pass: export-time secret guard, PII redaction, idempotency-key
+safety, and validation parity for the claim/confirm calls.
+
+### Security
+- **Export guard**: a new `EditorExportPlugin` raises a loud error whenever a
+  build is exported while the sandbox game secret is persisted in
+  `project.godot`. The release-build lockout already stopped the secret from
+  being *used*, but it still *shipped* inside the PCK (extractable by any
+  player) — now it can't ship silently.
+- **PII redaction extended to paths**: observability signals already dropped
+  query strings; the one route that carries a player email in the path
+  (`/player-balances/player/by-email/…`) is now redacted too.
+- Absolute-URL detection tightened to explicit `http://`/`https://` prefixes.
+- The wallet overlay's "no credentials → offline mock" fallback no longer
+  treats a whitespace-only secret/endpoint as configured.
+
+### Fixed
+- **Idempotency-key collisions**: the wallet panel derived
+  `client_request_id` from `Time.get_ticks_msec()`, which restarts at 0 every
+  run — two sessions could silently deduplicate each other's sends. New
+  `InvoSandboxServer.new_client_request_id()` (128-bit CSPRNG) is used
+  instead and exported for integrators.
+- A failed `Invo.setup()` (bad base-URL override) no longer half-applies: the
+  environment/game-id now only change after the URL passes validation.
+- `claim_transfer` / `claim_currency` / `confirm_payment` now validate inputs
+  before the wire (required fields, E.164 phone, target currency id) —
+  closing the gap in the "method-for-method port including input validation"
+  contract.
+- The wallet panel no longer crashes on refresh if the SDK failed to
+  configure; the dock's connection test no longer touches freed nodes when
+  the plugin is disabled mid-request.
+- 9 new tests (54 total).
+
 ## [0.2.0] — 2026-07-15
 
 Correctness + security audit release.

@@ -62,14 +62,17 @@ func _ready() -> void:
 ## settings; call manually to override at runtime. The player token and
 ## token provider survive re-configuration.
 func setup(p_environment: String, p_game_id: String = "", base_url_override: String = "") -> void:
-	environment = p_environment if p_environment in BASE_URLS else "sandbox"
-	game_id = p_game_id
+	var env: String = p_environment if p_environment in BASE_URLS else "sandbox"
 	var base: String = base_url_override if not base_url_override.is_empty() \
-			else str(BASE_URLS[environment])
+			else str(BASE_URLS[env])
 	var problem: String = InvoHttp.secure_base_url_problem(base)
 	if not problem.is_empty():
+		# Reject BEFORE mutating: a failed setup() must leave the previous
+		# (working) configuration fully intact.
 		push_error("[Invo] %s" % problem)
 		return
+	environment = env
+	game_id = p_game_id
 	_http.configure(base)
 	var previous_token: String = _client.token() if _client != null else ""
 	var previous_provider: Callable = _client.token_provider if _client != null else Callable()

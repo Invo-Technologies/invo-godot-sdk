@@ -7,6 +7,7 @@ const AUTOLOAD_NAME: String = "Invo"
 const DOCK_SCENE: String = "res://addons/invonetwork/dock/invo_dock.tscn"
 
 var _dock: Control
+var _export_guard: InvoExportGuard
 
 
 func _enter_tree() -> void:
@@ -17,11 +18,16 @@ func _enter_tree() -> void:
 	_define_setting("invonetwork/sandbox_only/game_secret", TYPE_STRING, "",
 			PROPERTY_HINT_PASSWORD)
 	add_autoload_singleton(AUTOLOAD_NAME, "res://addons/invonetwork/invo.gd")
+	_export_guard = InvoExportGuard.new()
+	add_export_plugin(_export_guard)
 	_dock = (load(DOCK_SCENE) as PackedScene).instantiate()
 	add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_BL, _dock)
 
 
 func _exit_tree() -> void:
+	if _export_guard != null:
+		remove_export_plugin(_export_guard)
+		_export_guard = null
 	if _dock != null:
 		remove_control_from_docks(_dock)
 		_dock.queue_free()

@@ -53,7 +53,7 @@ func _on_login() -> void:
 
 
 func _on_refresh() -> void:
-	if not Invo.client().has_token():
+	if Invo.client() == null or not Invo.client().has_token():
 		_say("Sign in first (or configure a player token).")
 		return
 	_say("Refreshing...")
@@ -175,7 +175,7 @@ func _on_send() -> void:
 	_say("Initiating send...")
 	var dest: Dictionary = _destinations[_send_dest.selected]
 	var res: InvoResult = await server.initiate_send(
-			"godot-%d" % Time.get_ticks_msec(),  # client_request_id (idempotency)
+			InvoSandboxServer.new_client_request_id(),  # idempotency key
 			email.get_slice("@", 0), email, my_phone,
 			to_phone, dest.get("game_id"), amount)
 	if res.ok:

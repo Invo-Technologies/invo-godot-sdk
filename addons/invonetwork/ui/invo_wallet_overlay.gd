@@ -25,8 +25,10 @@ func _ready() -> void:
 	# panel still demonstrates the flows (dev builds only — never ship the mock).
 	if OS.is_debug_build() \
 			and OS.get_environment(Invo.SECRET_ENV_VAR).strip_edges().is_empty() \
-			and str(ProjectSettings.get_setting(Invo.SETTING_SANDBOX_SECRET, "")).is_empty() \
-			and str(ProjectSettings.get_setting(Invo.SETTING_TOKEN_ENDPOINT, "")).is_empty():
+			and str(ProjectSettings.get_setting(Invo.SETTING_SANDBOX_SECRET, "")) \
+					.strip_edges().is_empty() \
+			and str(ProjectSettings.get_setting(Invo.SETTING_TOKEN_ENDPOINT, "")) \
+					.strip_edges().is_empty():
 		Invo.enable_mock()
 
 

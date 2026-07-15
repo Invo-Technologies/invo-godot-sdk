@@ -58,6 +58,10 @@ func _on_test() -> void:
 	http.configure("https://sandbox.invo.network/sandbox")
 	var server: InvoSandboxServer = InvoSandboxServer.new(http, _secret.text.strip_edges())
 	var res: InvoResult = await server.mint_player_token(email)
+	# The plugin may have been disabled (dock freed) while the request was in
+	# flight — the resumed coroutine must not touch freed nodes.
+	if not is_instance_valid(self) or not is_instance_valid(_status):
+		return
 	http.queue_free()
 	if res.ok:
 		_status.text = "✔ Connected — token minted for identity %s (expires %s)." % [
