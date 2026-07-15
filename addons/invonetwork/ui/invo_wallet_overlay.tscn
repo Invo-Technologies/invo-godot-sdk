@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://addons/invonetwork/ui/invo_wallet_overlay.gd" id="1_overlay"]
+[ext_resource type="PackedScene" path="res://addons/invonetwork/ui/invo_wallet_panel.tscn" id="2_panel"]
+
+[node name="InvoWalletOverlay" type="CanvasLayer"]
+layer = 100
+script = ExtResource("1_overlay")
+
+[node name="Center" type="CenterContainer" parent="."]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="InvoWalletPanel" parent="Center" instance=ExtResource("2_panel")]

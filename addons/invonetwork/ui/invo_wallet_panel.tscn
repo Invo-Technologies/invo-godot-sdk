@@ -1,0 +1,110 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/invonetwork/ui/invo_wallet_panel.gd" id="1_wallet"]
+
+[node name="InvoWalletPanel" type="PanelContainer"]
+custom_minimum_size = Vector2(420, 0)
+script = ExtResource("1_wallet")
+
+[node name="Margin" type="MarginContainer" parent="."]
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="VBox" type="VBoxContainer" parent="Margin"]
+theme_override_constants/separation = 8
+
+[node name="Header" type="HBoxContainer" parent="Margin/VBox"]
+
+[node name="Title" type="Label" parent="Margin/VBox/Header"]
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+text = "INVO Wallet"
+
+[node name="RefreshButton" type="Button" parent="Margin/VBox/Header"]
+unique_name_in_owner = true
+text = "Refresh"
+
+[node name="BalanceLabel" type="Label" parent="Margin/VBox"]
+unique_name_in_owner = true
+theme_override_font_sizes/font_size = 26
+text = "—"
+
+[node name="StatusLabel" type="Label" parent="Margin/VBox"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.75)
+autowrap_mode = 2
+text = ""
+
+[node name="PendingTitle" type="Label" parent="Margin/VBox"]
+unique_name_in_owner = true
+visible = false
+modulate = Color(1, 1, 1, 0.8)
+text = "Waiting to collect:"
+
+[node name="PendingBox" type="VBoxContainer" parent="Margin/VBox"]
+unique_name_in_owner = true
+
+[node name="Sep1" type="HSeparator" parent="Margin/VBox"]
+
+[node name="EmailRow" type="HBoxContainer" parent="Margin/VBox"]
+
+[node name="EmailField" type="LineEdit" parent="Margin/VBox/EmailRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+placeholder_text = "player email"
+
+[node name="LoginButton" type="Button" parent="Margin/VBox/EmailRow"]
+unique_name_in_owner = true
+text = "Sign in"
+
+[node name="BuyRow" type="HBoxContainer" parent="Margin/VBox"]
+
+[node name="UsdField" type="LineEdit" parent="Margin/VBox/BuyRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+placeholder_text = "USD amount (e.g. 4.99)"
+
+[node name="BuyButton" type="Button" parent="Margin/VBox/BuyRow"]
+unique_name_in_owner = true
+text = "Add funds"
+
+[node name="ClaimRow" type="HBoxContainer" parent="Margin/VBox"]
+
+[node name="ClaimCode" type="LineEdit" parent="Margin/VBox/ClaimRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+placeholder_text = "claim code"
+
+[node name="ClaimButton" type="Button" parent="Margin/VBox/ClaimRow"]
+unique_name_in_owner = true
+text = "Claim"
+
+[node name="Sep2" type="HSeparator" parent="Margin/VBox"]
+
+[node name="SendTitle" type="Label" parent="Margin/VBox"]
+modulate = Color(1, 1, 1, 0.8)
+text = "Send to another player"
+
+[node name="SendRow" type="HBoxContainer" parent="Margin/VBox"]
+
+[node name="SendPhone" type="LineEdit" parent="Margin/VBox/SendRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+placeholder_text = "+15555550100"
+
+[node name="SendAmount" type="LineEdit" parent="Margin/VBox/SendRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(90, 0)
+placeholder_text = "amount"
+
+[node name="SendRow2" type="HBoxContainer" parent="Margin/VBox"]
+
+[node name="SendDestination" type="OptionButton" parent="Margin/VBox/SendRow2"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+
+[node name="SendButton" type="Button" parent="Margin/VBox/SendRow2"]
+unique_name_in_owner = true
+text = "Send"
