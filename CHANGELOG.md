@@ -2,6 +2,49 @@
 
 All notable changes to the INVO Godot SDK. Versioning follows [SemVer](https://semver.org/); the API surface tracks the INVO backend and mirrors the [web (npm)](https://www.npmjs.com/package/@invonetwork/web-sdk) and [Python (PyPI)](https://pypi.org/project/invonetwork/) SDKs (currently v2.4.1 parity).
 
+## [0.2.0] — 2026-07-15
+
+Correctness + security audit release.
+
+### Fixed
+- **Money validation at large magnitudes**: the ≤2-decimal-places check used a
+  relative float comparison, so values like `999999.999` were wrongly accepted;
+  now an absolute integer-cents comparison at any magnitude.
+- IPv6 loopback (`http://[::1]`) is now correctly recognized as local in the
+  base-URL check.
+- Token-refresh waiters now learn whether the shared refresh actually
+  succeeded, instead of misreading a stale token as success.
+
+### Added
+- **`Invo.login_via_backend(payload, endpoint?)`** — the client-mode login
+  path: POSTs to YOUR backend's token endpoint
+  (`invonetwork/config/player_token_endpoint`), expects `{token, identity_id?}`,
+  wires automatic re-mint on expiry. Client mode is now usable end to end
+  without custom code.
+- `initiate_send`/`initiate_transfer` client-side validation (E.164 phones,
+  plain-decimal amount, required ids) — rejected before the wire.
+- Client calls without a token fail fast with `NO_PLAYER_TOKEN` instead of a
+  confusing backend 401.
+- `Invo.disable_mock()`.
+- 10 new tests (45 total).
+
+### Security
+- **Release-build lockout**: direct (game-secret) mode and the mock transport
+  are refused in non-debug builds — a sandbox secret or fake-commerce mock can
+  no longer function inside an exported game.
+- **`INVO_SANDBOX_SECRET` environment variable** now takes precedence over the
+  project setting, so the secret need never be persisted in `project.godot`
+  (which ships inside exports).
+- Header values are sanitized (control characters stripped) so a hostile
+  token string cannot smuggle extra headers.
+- `OS.shell_open` is now gated by an https-only allowlist on checkout URLs.
+- Observability signals redact query strings (player emails/phones never
+  reach logs).
+- https enforcement moved into `InvoHttp.configure()` itself — no code path
+  can downgrade to plaintext with credentials attached.
+- The wallet panel no longer hard-codes a placeholder phone number; it has a
+  proper phone field for claim/send.
+
 ## [0.1.0] — 2026-07-15
 
 Initial release.

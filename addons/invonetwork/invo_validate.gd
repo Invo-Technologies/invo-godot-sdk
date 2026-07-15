@@ -41,8 +41,10 @@ static func money_problem(value: Variant, max_value: float, label: String) -> In
 		var f: float = value
 		if not is_finite(f):
 			return InvoError.invalid_input(label, value, why)
-		# At most 2 decimal places: exact in integer cents.
-		if not is_equal_approx(roundf(f * 100.0), f * 100.0):
+		# At most 2 decimal places: exact in integer cents. ABSOLUTE epsilon —
+		# a relative comparison (is_equal_approx) would wrongly accept
+		# 3-decimal values at large magnitudes (e.g. 999999.999).
+		if absf(roundf(f * 100.0) - f * 100.0) > 0.000001:
 			return InvoError.invalid_input(label, value, why)
 		n = f
 	elif value is String:

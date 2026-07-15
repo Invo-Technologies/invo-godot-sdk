@@ -11,13 +11,15 @@ extends Node
 ## - https is enforced (loopback exempt) — the game secret travels in a header.
 ## - An explicit User-Agent (the backend 403-blocks blank/scanner UAs).
 
+## Observability signals. URLs are emitted WITHOUT their query string —
+## queries can carry player emails/phones (PII) that must not reach logs.
 signal request_completed(method: String, url: String, status: int, attempt: int)
 signal request_errored(method: String, url: String, error: InvoError, will_retry: bool)
 
 const DEFAULT_TIMEOUT: float = 30.0
 const MAX_RETRY_AFTER: float = 20.0
 const RETRIABLE_STATUS: Array[int] = [429, 500, 502, 503, 504]
-const USER_AGENT: String = "invonetwork-godot-sdk/0.1.0 (+https://invo.network)"
+const USER_AGENT: String = "invonetwork-godot-sdk/0.2.0 (+https://invo.network)"
 
 var base_url: String = ""
 var timeout: float = DEFAULT_TIMEOUT
@@ -36,8 +38,13 @@ static func secure_base_url_problem(url: String) -> String:
 	if scheme_split.size() != 2 or scheme_split[1].is_empty():
 		return "Invalid baseUrl: %s" % url
 	var scheme: String = scheme_split[0].to_lower()
-	var host: String = scheme_split[1].split("/", true, 1)[0].split(":", true, 1)[0].to_lower()
-	var is_local: bool = host in ["localhost", "127.0.0.1", "[::1]", "::1"]
+	var host_port: String = scheme_split[1].split("/", true, 1)[0].to_lower()
+	var host: String
+	if host_port.begins_with("["):
+		host = host_port.split("]", true, 1)[0] + "]"  # bracketed IPv6
+	else:
+		host = host_port.split(":", true, 1)[0]
+	var is_local: bool = host in ["localhost", "127.0.0.1", "[::1]"]
 	if scheme == "https" or (scheme == "http" and is_local):
 		return ""
 	return 'baseUrl must use https:// (got "%s://"). Plaintext would expose the game secret on the wire.' % scheme
@@ -45,6 +52,13 @@ static func secure_base_url_problem(url: String) -> String:
 
 func configure(p_base_url: String, p_timeout: float = DEFAULT_TIMEOUT,
 		p_max_retries: int = 2, p_retry_base_delay: float = 0.25) -> void:
+	# Enforced here, not just at the facade — no code path may downgrade to
+	# plaintext with credentials in the headers.
+	var problem: String = secure_base_url_problem(p_base_url)
+	if not problem.is_empty():
+		push_error("[InvoHttp] %s" % problem)
+		base_url = ""
+		return
 	base_url = p_base_url.rstrip("/")
 	timeout = p_timeout
 	max_retries = maxi(0, p_max_retries)
@@ -62,28 +76,57 @@ func post_json(path: String, body: Variant, auth_headers: Dictionary,
 	return await _request("POST", path, body, auth_headers, idempotent)
 
 
+## POST to an ABSOLUTE url (e.g. the partner's own player-token endpoint).
+## The same https rule applies.
+func post_url(url: String, body: Variant, auth_headers: Dictionary,
+		idempotent: bool = false) -> InvoResult:
+	var problem: String = secure_base_url_problem(url)
+	if not problem.is_empty():
+		return InvoResult.failure(InvoError.make(problem, "INVALID_INPUT", 0))
+	return await _request("POST", url, body, auth_headers, idempotent)
+
+
+## Strip CR/LF and other control characters from a header value so a hostile
+## string (e.g. a tampered token) can never smuggle extra headers.
+static func sanitize_header_value(value: String) -> String:
+	var out: String = ""
+	for i: int in value.length():
+		var c: int = value.unicode_at(i)
+		if c >= 0x20 and c != 0x7F:
+			out += value[i]
+	return out
+
+
 func _request(method: String, path: String, body: Variant,
 		auth_headers: Dictionary, idempotent: bool) -> InvoResult:
-	var url: String = base_url + path
+	var url: String = path if path.begins_with("http") else base_url + path
+	if base_url.is_empty() and not path.begins_with("http"):
+		return InvoResult.failure(InvoError.make(
+				"InvoHttp is not configured (no base URL).", "NOT_CONFIGURED", 0))
 	var headers: Dictionary = {"Accept": "application/json", "User-Agent": USER_AGENT}
 	for key: String in auth_headers:
-		headers[key] = auth_headers[key]
+		headers[key] = sanitize_header_value(str(auth_headers[key]))
 	var body_text: String = ""
 	if body != null:
 		headers["Content-Type"] = "application/json"
 		body_text = JSON.stringify(body)
+	# PII rule: never emit query strings (they can carry emails/phones).
+	var loggable_url: String = url.split("?", true, 1)[0]
 
 	var attempt: int = 0
 	while true:
 		var raw: Dictionary = await _run_transport(method, url, headers, body_text, body)
 
 		if raw.get("network_error", false):
-			var msg: String = raw.get("message", "network error")
-			var net_err: InvoError = InvoError.make(
-				"Request to %s timed out after %ss" % [path, timeout] if raw.get("timeout", false)
-				else "Network error calling %s: %s" % [path, msg], "", 0)
+			var message: String
+			if raw.get("timeout", false):
+				message = "Request to %s timed out after %ss" % [loggable_url, timeout]
+			else:
+				message = "Network error calling %s: %s" % [
+						loggable_url, raw.get("message", "network error")]
+			var net_err: InvoError = InvoError.make(message, "", 0)
 			var will_retry: bool = idempotent and attempt < max_retries
-			request_errored.emit(method, url, net_err, will_retry)
+			request_errored.emit(method, loggable_url, net_err, will_retry)
 			if will_retry:
 				await get_tree().create_timer(_backoff(attempt)).timeout
 				attempt += 1
@@ -94,7 +137,7 @@ func _request(method: String, path: String, body: Variant,
 		var response_headers: Dictionary = raw.get("headers", {})
 		var parsed: Variant = raw.get("body", null)
 		var request_id: String = _pick_request_id(response_headers)
-		request_completed.emit(method, url, status, attempt)
+		request_completed.emit(method, loggable_url, status, attempt)
 
 		if status < 200 or status >= 300:
 			var err: InvoError = InvoError.from_response(status, parsed, request_id)
@@ -109,7 +152,7 @@ func _request(method: String, path: String, body: Variant,
 					# else: surface the 429 rather than stalling
 				else:
 					wait = _backoff(attempt)
-			request_errored.emit(method, url, err, wait >= 0.0)
+			request_errored.emit(method, loggable_url, err, wait >= 0.0)
 			if wait >= 0.0:
 				await get_tree().create_timer(wait).timeout
 				attempt += 1

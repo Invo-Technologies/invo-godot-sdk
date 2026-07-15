@@ -57,7 +57,8 @@ placeholder_text = "https://your-backend.example/invo/token"
 [node name="SecretLabel" type="Label" parent="Scroll/VBox"]
 modulate = Color(1, 1, 1, 0.7)
 layout_mode = 2
-text = "Sandbox game secret (dev only — never ships)"
+autowrap_mode = 2
+text = "Sandbox game secret (dev only — never ships). Prefer the INVO_SANDBOX_SECRET env var: nothing persisted, nothing exportable."
 
 [node name="SandboxSecret" type="LineEdit" parent="Scroll/VBox"]
 unique_name_in_owner = true

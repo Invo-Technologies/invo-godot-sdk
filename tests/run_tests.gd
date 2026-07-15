@@ -22,10 +22,15 @@ func _run_all() -> void:
 	_test_claim_mapping()
 	await _test_retry_on_idempotent()
 	await _test_no_retry_on_non_idempotent()
+	await _test_network_error_retry()
 	await _test_purchase_item_validation()
 	await _test_mock_insufficient_balance()
 	await _test_mint_requires_token_field()
 	await _test_token_refresh()
+	await _test_empty_token_fast_fail()
+	await _test_initiate_validation()
+	_test_header_sanitization()
+	_test_large_value_decimal_bug()
 	print("\n[tests] %d passed, %d failed" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
 
@@ -204,6 +209,78 @@ func _test_mint_requires_token_field() -> void:
 	_check(not res.ok and res.error.code == "INVALID_RESPONSE",
 			"missing token field on 2xx flagged INVALID_RESPONSE")
 	http.queue_free()
+
+
+func _test_network_error_retry() -> void:
+	var state: Dictionary = {"attempts": 0}
+	var http: InvoHttp = _make_http(func(_m: String, _u: String, _h: Dictionary,
+			_b: Variant) -> Dictionary:
+		state["attempts"] += 1
+		if state["attempts"] < 2:
+			return {"network_error": true, "timeout": true}
+		return {"status": 200, "headers": {}, "body": {"fine": true}})
+	var res: InvoResult = await http.get_json("/x", {})
+	_check(res.ok and state["attempts"] == 2, "network timeout retried on idempotent GET")
+	var state2: Dictionary = {"attempts": 0}
+	var http2: InvoHttp = _make_http(func(_m: String, _u: String, _h: Dictionary,
+			_b: Variant) -> Dictionary:
+		state2["attempts"] += 1
+		return {"network_error": true, "timeout": false, "message": "refused"})
+	var res2: InvoResult = await http2.post_json("/x", {}, {}, false)
+	_check(not res2.ok and state2["attempts"] == 1 and res2.error.status == 0,
+			"network error on non-idempotent POST surfaces without retry")
+	http.queue_free()
+	http2.queue_free()
+
+
+func _test_empty_token_fast_fail() -> void:
+	var state: Dictionary = {"attempts": 0}
+	var http: InvoHttp = _make_http(func(_m: String, _u: String, _h: Dictionary,
+			_b: Variant) -> Dictionary:
+		state["attempts"] += 1
+		return {"status": 200, "headers": {}, "body": {}})
+	var client: InvoPlayerClient = InvoPlayerClient.new(http, "")
+	var res: InvoResult = await client.get_balance()
+	_check(not res.ok and res.error.code == "NO_PLAYER_TOKEN" and state["attempts"] == 0,
+			"empty token fails fast without hitting the wire")
+	http.queue_free()
+
+
+func _test_initiate_validation() -> void:
+	var state: Dictionary = {"attempts": 0}
+	var http: InvoHttp = _make_http(func(_m: String, _u: String, _h: Dictionary,
+			_b: Variant) -> Dictionary:
+		state["attempts"] += 1
+		return {"status": 200, "headers": {}, "body": {"transaction_id": "t"}})
+	var server: InvoSandboxServer = InvoSandboxServer.new(http, "secret")
+	var bad_phone: InvoResult = await server.initiate_send(
+			"r1", "P", "p@example.com", "5550100", "+15555550101", 7, "10.00")
+	_check(not bad_phone.ok and bad_phone.error.code == "INVALID_INPUT"
+			and state["attempts"] == 0, "initiate_send rejects non-E.164 sender phone")
+	var bad_amount: InvoResult = await server.initiate_transfer(
+			"r2", "P", "p@example.com", "+15555550100", "+15555550101", 7, "1e3")
+	_check(not bad_amount.ok and bad_amount.error.code == "INVALID_INPUT"
+			and state["attempts"] == 0, "initiate_transfer rejects non-plain-decimal amount")
+	var good: InvoResult = await server.initiate_send(
+			"r3", "P", "p@example.com", "+15555550100", "+15555550101", 7, "10.00")
+	_check(good.ok and state["attempts"] == 1, "valid initiate reaches the wire")
+	http.queue_free()
+
+
+func _test_header_sanitization() -> void:
+	_check(InvoHttp.sanitize_header_value("abc\r\nX-Evil: 1") == "abcX-Evil: 1",
+			"CR/LF stripped from header values")
+	_check(InvoHttp.sanitize_header_value("token-ok_123") == "token-ok_123",
+			"normal header value untouched")
+
+
+func _test_large_value_decimal_bug() -> void:
+	# Regression: relative-epsilon comparison accepted 3 decimals at large
+	# magnitudes. Must be rejected at any magnitude.
+	_check(InvoValidate.money_problem(999999.999, InvoValidate.MAX_ITEM_PRICE, "p") != null,
+			"large-magnitude 3-decimal float rejected")
+	_check(InvoValidate.money_problem(999999.99, InvoValidate.MAX_ITEM_PRICE, "p") == null,
+			"max item price accepted")
 
 
 func _test_token_refresh() -> void:

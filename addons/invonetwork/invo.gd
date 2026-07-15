@@ -6,11 +6,18 @@ extends Node
 ## Two entries, mirroring the official Unity/Unreal/web SDKs:
 ##
 ## - **Client mode** (`Invo.client()`): player-token flows, safe to ship.
-##   Your backend mints the token (INVO Python/JS server SDK) and your game
-##   fetches it from an endpoint you own; wire that in `token_provider`.
+##   Your backend mints the token (INVO Python/JS server SDK); wire the
+##   endpoint in settings and call login_via_backend(), or push tokens in
+##   yourself with set_player_token().
 ## - **Direct sandbox mode** (`Invo.sandbox()`): the full server API with the
 ##   game secret, for LOCAL PROTOTYPING against the sandbox only. Refused in
-##   production — the secret must never ship in a game build.
+##   the production environment AND in non-debug (release/exported) builds —
+##   the secret must never ship in a game build.
+##
+## Sandbox secret sourcing (first match wins):
+##   1. The INVO_SANDBOX_SECRET environment variable  <- recommended: nothing
+##      is persisted in project.godot, so nothing can leak into an export.
+##   2. Project setting invonetwork/sandbox_only/game_secret (dev convenience).
 
 ## A call failed (after retries). Connect for global error UI/logging.
 signal request_failed(error: InvoError)
@@ -25,6 +32,7 @@ const SETTING_ENVIRONMENT: String = "invonetwork/config/environment"
 const SETTING_GAME_ID: String = "invonetwork/config/game_id"
 const SETTING_TOKEN_ENDPOINT: String = "invonetwork/config/player_token_endpoint"
 const SETTING_SANDBOX_SECRET: String = "invonetwork/sandbox_only/game_secret"
+const SECRET_ENV_VAR: String = "INVO_SANDBOX_SECRET"
 
 const BASE_URLS: Dictionary = {
 	"sandbox": "https://sandbox.invo.network/sandbox",
@@ -51,7 +59,8 @@ func _ready() -> void:
 
 
 ## Configure (or re-configure) the SDK. Called automatically from project
-## settings; call manually to override at runtime.
+## settings; call manually to override at runtime. The player token and
+## token provider survive re-configuration.
 func setup(p_environment: String, p_game_id: String = "", base_url_override: String = "") -> void:
 	environment = p_environment if p_environment in BASE_URLS else "sandbox"
 	game_id = p_game_id
@@ -62,15 +71,17 @@ func setup(p_environment: String, p_game_id: String = "", base_url_override: Str
 		push_error("[Invo] %s" % problem)
 		return
 	_http.configure(base)
-	_client = InvoPlayerClient.new(_http)
+	var previous_token: String = _client.token() if _client != null else ""
+	var previous_provider: Callable = _client.token_provider if _client != null else Callable()
+	_client = InvoPlayerClient.new(_http, previous_token)
+	_client.token_provider = previous_provider
 	_sandbox = null
 
 
 ## ------------------------------------------------------------------ client
 
-## The player-token client (safe to ship). Set a token first — either from
-## your backend via set_player_token()/token_provider, or in sandbox via
-## login_sandbox().
+## The player-token client (safe to ship). Set a token first — via
+## login_via_backend(), set_player_token(), or (sandbox) login_sandbox().
 func client() -> InvoPlayerClient:
 	return _client
 
@@ -78,7 +89,7 @@ func client() -> InvoPlayerClient:
 ## Hand the client a player token your backend minted.
 func set_player_token(token: String, identity_id: String = "") -> void:
 	_client.set_token(token)
-	if not token.is_empty():
+	if _client.has_token():
 		logged_in.emit(identity_id)
 
 
@@ -86,6 +97,38 @@ func set_player_token(token: String, identity_id: String = "") -> void:
 ## (SDK_TOKEN_EXPIRED) — typically an HTTP call to YOUR backend.
 func set_token_provider(provider: Callable) -> void:
 	_client.token_provider = provider
+
+
+## Fetch a player token from YOUR backend's token endpoint (the
+## invonetwork/config/player_token_endpoint setting, or `endpoint_override`).
+##
+## The endpoint is yours: POSTs `payload` as JSON (send whatever your backend
+## needs to identify the session) and expects `{"token": "...",
+## "identity_id"?: "..."}` back — on your server, that's one call to
+## `mint_player_token` with the INVO Python/JS SDK. On success the client is
+## logged in and a token provider is wired for automatic re-mint on expiry.
+func login_via_backend(payload: Dictionary = {}, endpoint_override: String = "") -> InvoResult:
+	var endpoint: String = endpoint_override if not endpoint_override.is_empty() \
+			else str(ProjectSettings.get_setting(SETTING_TOKEN_ENDPOINT, ""))
+	if endpoint.strip_edges().is_empty():
+		return InvoResult.failure(InvoError.make(
+				"No player-token endpoint configured. Set " +
+				"invonetwork/config/player_token_endpoint (Project Settings or the " +
+				"INVO dock) to an endpoint on YOUR backend that mints player tokens.",
+				"NO_TOKEN_ENDPOINT", 0))
+	var res: InvoResult = await _http.post_url(endpoint.strip_edges(), payload, {})
+	if not res.ok:
+		return res
+	var token: String = str(res.dict().get("token", ""))
+	if token.is_empty():
+		return InvoResult.failure(InvoError.make(
+				"The token endpoint responded without a `token` field.",
+				"INVALID_RESPONSE", 0, res.data))
+	set_player_token(token, str(res.dict().get("identity_id", "")))
+	set_token_provider(func() -> String:
+		var refresh: InvoResult = await _http.post_url(endpoint.strip_edges(), payload, {})
+		return str(refresh.dict().get("token", "")) if refresh.ok else "")
+	return res
 
 
 ## Fetch the player's balance (client mode) and broadcast balance_updated.
@@ -99,23 +142,42 @@ func fetch_balance() -> InvoResult:
 ## ---------------------------------------------------------------- sandbox
 
 ## The DIRECT sandbox entry (full server API, game secret). Returns null —
-## with a loud error — outside the sandbox environment.
+## with a loud error — outside the sandbox environment or in a non-debug
+## (release/exported) build.
 func sandbox() -> InvoSandboxServer:
-	if environment != "sandbox" and not _mock_enabled:
+	if _mock_enabled:
+		if _sandbox == null:
+			_sandbox = InvoSandboxServer.new(_http, "mock-secret")
+		return _sandbox
+	if environment != "sandbox":
 		push_error(
 			"[Invo] Direct mode is sandbox-only. In production your own backend " +
 			"holds the game secret (INVO server SDKs on npm/PyPI) — the secret " +
 			"must NEVER ship inside a game build.")
 		return null
+	if not OS.is_debug_build():
+		push_error(
+			"[Invo] Direct mode is disabled in release builds. A game secret in " +
+			"an exported build is exposed to every player — use your backend + " +
+			"player tokens (client mode) instead.")
+		return null
 	if _sandbox == null:
-		var secret: String = str(ProjectSettings.get_setting(SETTING_SANDBOX_SECRET, ""))
-		if secret.is_empty() and not _mock_enabled:
+		var secret: String = _resolve_sandbox_secret()
+		if secret.is_empty():
 			push_error(
-				"[Invo] No sandbox game secret configured. Set it in Project " +
-				"Settings -> Invonetwork -> Sandbox Only (editor/dev only).")
+				"[Invo] No sandbox game secret configured. Prefer the %s " % SECRET_ENV_VAR +
+				"environment variable (never persisted); or set it in Project " +
+				"Settings -> Invonetwork -> Sandbox Only (dev only).")
 			return null
 		_sandbox = InvoSandboxServer.new(_http, secret)
 	return _sandbox
+
+
+func _resolve_sandbox_secret() -> String:
+	var from_env: String = OS.get_environment(SECRET_ENV_VAR).strip_edges()
+	if not from_env.is_empty():
+		return from_env
+	return str(ProjectSettings.get_setting(SETTING_SANDBOX_SECRET, "")).strip_edges()
 
 
 ## Sandbox convenience: mint a player token for an existing sandbox player and
@@ -142,7 +204,13 @@ func open_checkout(player_email: String, usd_amount: Variant) -> InvoResult:
 	var res: InvoResult = await server.create_checkout(player_email, usd_amount)
 	if res.ok:
 		var url: String = str(res.dict().get("checkout_url", ""))
-		OS.shell_open(url)
+		# Scheme allowlist: only ever hand https URLs to the OS. A tampered
+		# response must not be able to launch file:// or custom-scheme handlers.
+		if not url.begins_with("https://"):
+			return InvoResult.failure(InvoError.make(
+					"Refusing to open a non-https checkout URL.", "UNSAFE_URL", 0, res.data))
+		if not _mock_enabled:
+			OS.shell_open(url)
 		checkout_opened.emit(url)
 	return res
 
@@ -151,12 +219,24 @@ func open_checkout(player_email: String, usd_amount: Variant) -> InvoResult:
 
 ## Route every request through the offline mock transport (no network, no
 ## credentials) — for tests and for trying the UI before you have a sandbox
-## account. NOT for shipping.
+## account. Debug builds only; a release build refuses (a shipped mock would
+## fake commerce results).
 func enable_mock() -> void:
+	if not OS.is_debug_build():
+		push_error("[Invo] The mock transport is for development only and is " +
+				"disabled in release builds.")
+		return
 	_mock_enabled = true
 	_http.transport = InvoMock.transport
 	if _client != null and not _client.has_token():
 		_client.set_token("mock-player-token")
+
+
+## Return to real transport (still requires configuration/credentials).
+func disable_mock() -> void:
+	_mock_enabled = false
+	_http.transport = Callable()
+	_sandbox = null
 
 
 func is_mock_enabled() -> bool:

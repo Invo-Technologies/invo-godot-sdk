@@ -14,8 +14,17 @@ First-party-style **Godot 4.x** plugin for [INVO Network](https://docs.invo.netw
 
 | Mode | Auth | Use |
 |---|---|---|
-| **Client** — `Invo.client()` | short-lived player token | Ships in your game. Balance, destinations, pending-collect. Your backend mints the token (`mint_player_token`) and your game fetches it from an endpoint you own. |
-| **Direct sandbox** — `Invo.sandbox()` | game secret | Local prototyping against the sandbox ONLY. The plugin refuses to construct it in the production environment. |
+| **Client** — `Invo.client()` | short-lived player token | Ships in your game. Balance, destinations, pending-collect. Your backend mints the token (`mint_player_token`); point `player_token_endpoint` at it and call `Invo.login_via_backend()`. |
+| **Direct sandbox** — `Invo.sandbox()` | game secret | Local prototyping against the sandbox ONLY. Refused in the production environment **and in non-debug (exported) builds**. |
+
+For the sandbox secret, prefer the **`INVO_SANDBOX_SECRET` environment variable** — it takes precedence over the project setting and never touches `project.godot` (which ships inside exported builds).
+
+```gdscript
+# Production pattern — client mode end to end:
+var login := await Invo.login_via_backend({"session": my_session_id})
+# your endpoint returns {"token": "...", "identity_id": "..."} by calling
+# mint_player_token server-side; re-mint on expiry is wired automatically.
+```
 
 ## Quick start (sandbox)
 

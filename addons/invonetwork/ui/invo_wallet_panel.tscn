@@ -55,6 +55,11 @@ unique_name_in_owner = true
 size_flags_horizontal = 3
 placeholder_text = "player email"
 
+[node name="PhoneField" type="LineEdit" parent="Margin/VBox/EmailRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 0)
+placeholder_text = "your phone (+1...)"
+
 [node name="LoginButton" type="Button" parent="Margin/VBox/EmailRow"]
 unique_name_in_owner = true
 text = "Sign in"

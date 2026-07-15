@@ -17,15 +17,18 @@ var _token: String = ""
 var token_provider: Callable = Callable()
 
 var _refreshing: bool = false
+var _last_refresh_ok: bool = false
 
 
 func _init(http: InvoHttp, token: String = "") -> void:
 	_http = http
-	_token = token
+	set_token(token)
 
 
 func set_token(token: String) -> void:
-	_token = token
+	# Sanitized here as well as at the transport: a token is the one header
+	# value that flows in from outside the SDK.
+	_token = InvoHttp.sanitize_header_value(token.strip_edges())
 
 
 func token() -> String:
@@ -78,6 +81,9 @@ func get_pending_collect() -> InvoResult:
 ## Start passkey recovery — sends a one-time code to the identity's phone/email.
 ## NOT idempotent (rate-limited 5/10min -> 429 rate_limited; 422 no_channel_on_file).
 func recovery_begin() -> InvoResult:
+	if not has_token():
+		return InvoResult.failure(InvoError.make(
+				"No player token set.", "NO_PLAYER_TOKEN", 0))
 	var res: InvoResult = await _http.post_json("/api/sdk/device/recover/begin", null, _auth())
 	if res.ok:
 		var raw: Dictionary = res.dict()
@@ -94,6 +100,9 @@ func recovery_begin() -> InvoResult:
 ## the normal enrollPasskey() ceremony. NOT idempotent (attempts are counted).
 ## NOTE the 24h money-OUT cooldown after recovery (PASSKEY_RECOVERY_COOLDOWN).
 func recovery_complete(code: String) -> InvoResult:
+	if not has_token():
+		return InvoResult.failure(InvoError.make(
+				"No player token set.", "NO_PLAYER_TOKEN", 0))
 	if not InvoValidate.is_present(code):
 		return InvoResult.failure(InvoError.invalid_input("code", code, "is required"))
 	var res: InvoResult = await _http.post_json(
@@ -112,6 +121,12 @@ func recovery_complete(code: String) -> InvoResult:
 
 
 func _get_with_token_retry(path: String) -> InvoResult:
+	if not has_token():
+		# Fail fast and clearly instead of sending "Bearer " to the backend.
+		return InvoResult.failure(InvoError.make(
+				"No player token set. Call Invo.set_player_token() with a token " +
+				"your backend minted, Invo.login_via_backend(), or (sandbox) " +
+				"Invo.login_sandbox().", "NO_PLAYER_TOKEN", 0))
 	var res: InvoResult = await _http.get_json(path, _auth())
 	if res.ok or res.error == null or not res.error.is_token_expired() \
 			or not token_provider.is_valid():
@@ -121,16 +136,19 @@ func _get_with_token_retry(path: String) -> InvoResult:
 	return await _http.get_json(path, _auth())
 
 
-## Single-flight refresh: concurrent expiries trigger one re-mint.
+## Single-flight refresh: concurrent expiries trigger one re-mint, and every
+## waiter learns whether THAT refresh actually succeeded (a stale token still
+## being present must not read as success).
 func _refresh_token() -> bool:
 	if _refreshing:
 		while _refreshing:
 			await _http.get_tree().create_timer(0.05).timeout
-		return has_token()
+		return _last_refresh_ok
 	_refreshing = true
+	_last_refresh_ok = false
 	var fresh: Variant = await token_provider.call()
-	_refreshing = false
 	if fresh is String and not (fresh as String).is_empty():
-		_token = fresh
-		return true
-	return false
+		set_token(fresh)
+		_last_refresh_ok = true
+	_refreshing = false
+	return _last_refresh_ok

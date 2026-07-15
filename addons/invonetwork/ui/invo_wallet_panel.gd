@@ -12,6 +12,7 @@ signal wallet_changed
 @onready var _status: Label = %StatusLabel
 @onready var _pending_box: VBoxContainer = %PendingBox
 @onready var _email: LineEdit = %EmailField
+@onready var _phone: LineEdit = %PhoneField
 @onready var _usd: LineEdit = %UsdField
 @onready var _claim_code: LineEdit = %ClaimCode
 @onready var _send_phone: LineEdit = %SendPhone
@@ -135,15 +136,16 @@ func _on_buy() -> void:
 func _on_claim() -> void:
 	var code: String = _claim_code.text.strip_edges()
 	var email: String = _email.text.strip_edges()
-	if code.is_empty() or email.is_empty():
-		_say("Enter your email and the claim code.")
+	var phone: String = _phone.text.strip_edges()
+	if code.is_empty() or email.is_empty() or phone.is_empty():
+		_say("Enter your email, your phone (+countrycode...), and the claim code.")
 		return
 	var server: InvoSandboxServer = Invo.sandbox()
 	if server == null:
 		_say("Claiming runs on your backend in production; sandbox mode required here.")
 		return
 	_say("Claiming...")
-	var res: InvoResult = await server.claim_currency(code, email.get_slice("@", 0), email, "+15555550100")
+	var res: InvoResult = await server.claim_currency(code, email.get_slice("@", 0), email, phone)
 	if res.ok:
 		if res.dict().get("needs_account_selection", false):
 			_say("This phone maps to several accounts — pick one in your integration.")
@@ -159,11 +161,12 @@ func _on_claim() -> void:
 
 func _on_send() -> void:
 	var email: String = _email.text.strip_edges()
-	var phone: String = _send_phone.text.strip_edges()
+	var my_phone: String = _phone.text.strip_edges()
+	var to_phone: String = _send_phone.text.strip_edges()
 	var amount: String = _send_amount.text.strip_edges()
-	if email.is_empty() or phone.is_empty() or amount.is_empty() \
+	if email.is_empty() or my_phone.is_empty() or to_phone.is_empty() or amount.is_empty() \
 			or _send_dest.selected < 0 or _send_dest.selected >= _destinations.size():
-		_say("Fill in recipient phone, amount, and destination.")
+		_say("Fill in your phone, the recipient phone, amount, and destination.")
 		return
 	var server: InvoSandboxServer = Invo.sandbox()
 	if server == null:
@@ -173,8 +176,8 @@ func _on_send() -> void:
 	var dest: Dictionary = _destinations[_send_dest.selected]
 	var res: InvoResult = await server.initiate_send(
 			"godot-%d" % Time.get_ticks_msec(),  # client_request_id (idempotency)
-			email.get_slice("@", 0), email, "+15555550100",
-			phone, dest.get("game_id"), amount)
+			email.get_slice("@", 0), email, my_phone,
+			to_phone, dest.get("game_id"), amount)
 	if res.ok:
 		var method: String = str(res.dict().get("verification_method", ""))
 		if res.dict().get("guardian_approval") != null:

@@ -21,9 +21,10 @@ func _ready() -> void:
 		key.physical_keycode = KEY_F8
 		InputMap.action_add_event(ACTION, key)
 	$Center.visible = false
-	# No credentials configured? Fall back to the offline mock so the panel
-	# still demonstrates the flows (dev builds only — never ship the mock).
+	# No credentials configured anywhere? Fall back to the offline mock so the
+	# panel still demonstrates the flows (dev builds only — never ship the mock).
 	if OS.is_debug_build() \
+			and OS.get_environment(Invo.SECRET_ENV_VAR).strip_edges().is_empty() \
 			and str(ProjectSettings.get_setting(Invo.SETTING_SANDBOX_SECRET, "")).is_empty() \
 			and str(ProjectSettings.get_setting(Invo.SETTING_TOKEN_ENDPOINT, "")).is_empty():
 		Invo.enable_mock()

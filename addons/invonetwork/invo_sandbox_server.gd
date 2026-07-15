@@ -63,6 +63,10 @@ func initiate_send(client_request_id: String, sender_player_name: String,
 		sender_player_email: String, sender_player_phone: String,
 		receiver_player_phone: String, receiving_game_id: Variant, amount: Variant,
 		receiver_player_email: String = "") -> InvoResult:
+	var input_err: InvoError = _initiate_problem(client_request_id, sender_player_name,
+			sender_player_email, sender_player_phone, receiver_player_phone, amount)
+	if input_err != null:
+		return _fail(input_err)
 	var body: Dictionary = {
 		"client_request_id": client_request_id,
 		"sender_player_name": sender_player_name,
@@ -85,6 +89,10 @@ func initiate_transfer(client_request_id: String, source_player_name: String,
 		source_player_email: String, source_player_phone: String,
 		target_player_phone: String, target_game_id: Variant, amount: Variant,
 		target_player_email: String = "") -> InvoResult:
+	var input_err: InvoError = _initiate_problem(client_request_id, source_player_name,
+			source_player_email, source_player_phone, target_player_phone, amount)
+	if input_err != null:
+		return _fail(input_err)
 	var body: Dictionary = {
 		"client_request_id": client_request_id,
 		"source_player_name": source_player_name,
@@ -608,6 +616,30 @@ func phone_share_status(phone: String, email: String) -> InvoResult:
 
 
 # ---- Internal ----
+
+## Shared validation for send/transfer initiation. The backend keys network
+## identity off E.164 phones and rejects non-plain-decimal amounts — reject
+## them before the wire (no USD-style cap here: transfer limits are per-
+## destination, from get_destinations).
+static func _initiate_problem(client_request_id: String, player_name: String,
+		player_email: String, sender_phone: String, receiver_phone: String,
+		amount: Variant) -> InvoError:
+	var required: Dictionary = {
+		"clientRequestId": client_request_id,
+		"playerName": player_name,
+		"playerEmail": player_email,
+	}
+	for label: String in required:
+		if not InvoValidate.is_present(required[label]):
+			return InvoError.invalid_input(label, required[label], "is required")
+	var sender_err: InvoError = InvoValidate.e164_problem(sender_phone, "senderPlayerPhone")
+	if sender_err != null:
+		return sender_err
+	var receiver_err: InvoError = InvoValidate.e164_problem(receiver_phone, "receiverPlayerPhone")
+	if receiver_err != null:
+		return receiver_err
+	return InvoValidate.money_problem(amount, InvoValidate.MAX_ITEM_PRICE, "amount")
+
 
 static func _fail(err: InvoError) -> InvoResult:
 	return InvoResult.failure(err)
