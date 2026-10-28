@@ -37,6 +37,12 @@ const SETTING_PRODUCTION_GAME_ID: String = "invonetwork/config/production_game_i
 const SETTING_DISPLAY_PREFIX: String = "invonetwork/display/"
 const SETTING_TOKEN_ENDPOINT: String = "invonetwork/config/player_token_endpoint"
 const SETTING_SANDBOX_SECRET: String = "invonetwork/sandbox_only/game_secret"
+## Production: your server, which forwards /api/* to INVO with the game
+## secret attached (the Unity SDK's "Game Server URL"). Used by commerce().
+const SETTING_GAME_SERVER_URL: String = "invonetwork/config/game_server_url"
+## Production: your endpoint that takes {player_email, usd_amount} and returns
+## {checkout_url} (hosted checkout for real-money top-ups).
+const SETTING_CHECKOUT_ENDPOINT: String = "invonetwork/config/checkout_session_endpoint"
 const SECRET_ENV_VAR: String = "INVO_SANDBOX_SECRET"
 
 const BASE_URLS: Dictionary = {
@@ -46,10 +52,15 @@ const BASE_URLS: Dictionary = {
 
 var environment: String = "sandbox"
 var game_id: String = ""
+## The player the wallet UI acts for (see set_active_player()).
+var player_email: String = ""
+var player_phone: String = ""
+var player_name: String = ""
 
 var _http: InvoHttp
 var _client: InvoPlayerClient
 var _sandbox: InvoSandboxServer
+var _proxy_http: InvoHttp
 var _mock_enabled: bool = false
 
 
@@ -161,6 +172,44 @@ func fetch_balance() -> InvoResult:
 	return res
 
 
+## Who the wallet UI acts for. Your game knows the signed-in player; set them
+## once after login. login_sandbox() sets the email for you.
+func set_active_player(email: String, phone: String = "", display_name: String = "") -> void:
+	player_email = email.strip_edges()
+	player_phone = phone.strip_edges()
+	player_name = display_name.strip_edges()
+
+
+## The full server API for the wallet UI's store, purchase, send, transfer and
+## phone calls, routed like the Unity SDK: in the sandbox (debug builds) it is
+## the direct sandbox() entry; in production it is the same calls sent to YOUR
+## game server (invonetwork/config/game_server_url) with the player's token,
+## and your server attaches the production key and forwards /api/* to INVO.
+## Returns null (with an error) when neither is available.
+func commerce() -> InvoSandboxServer:
+	if _mock_enabled or environment == "sandbox":
+		return sandbox()
+	var base: String = str(ProjectSettings.get_setting(SETTING_GAME_SERVER_URL, "")).strip_edges()
+	if base.is_empty():
+		push_error("[Invo] Set invonetwork/config/game_server_url: in production the " +
+				"wallet's store, send and transfer calls go through your game server.")
+		return null
+	var problem: String = InvoHttp.secure_base_url_problem(base)
+	if not problem.is_empty():
+		push_error("[Invo] %s" % problem)
+		return null
+	if _proxy_http == null:
+		_proxy_http = InvoHttp.new()
+		_proxy_http.name = "InvoGameServerHttp"
+		add_child(_proxy_http)
+		_proxy_http.request_errored.connect(_on_request_errored)
+	_proxy_http.configure(base.trim_suffix("/"))
+	var server: InvoSandboxServer = InvoSandboxServer.new(_proxy_http, "")
+	server.set_auth_headers({"Authorization": "Bearer %s" % _client.token()}
+			if _client != null and _client.has_token() else {})
+	return server
+
+
 ## ---------------------------------------------------------------- sandbox
 
 ## The DIRECT sandbox entry (full server API, game secret). Returns null —
@@ -204,26 +253,41 @@ func _resolve_sandbox_secret() -> String:
 
 ## Sandbox convenience: mint a player token for an existing sandbox player and
 ## switch the client to it. (In production this mint happens on YOUR backend.)
-func login_sandbox(player_email: String) -> InvoResult:
+func login_sandbox(p_email: String, p_phone: String = "", p_name: String = "") -> InvoResult:
 	var server: InvoSandboxServer = sandbox()
 	if server == null:
 		return InvoResult.failure(InvoError.make(
 				"Direct sandbox mode unavailable.", "SANDBOX_ONLY", 0))
-	var res: InvoResult = await server.mint_player_token(player_email)
+	var res: InvoResult = await server.mint_player_token(p_email, p_phone)
 	if res.ok:
 		set_player_token(str(res.dict().get("token", "")), str(res.dict().get("identity_id", "")))
+		set_active_player(p_email, p_phone, p_name)
 	return res
 
 
 ## Sandbox convenience: create a hosted checkout and open it in the system
 ## browser. Crediting lands via webhook to YOUR backend; poll get_order_details
 ## or re-fetch the balance after the player returns.
-func open_checkout(player_email: String, usd_amount: Variant) -> InvoResult:
-	var server: InvoSandboxServer = sandbox()
-	if server == null:
-		return InvoResult.failure(InvoError.make(
-				"Direct sandbox mode unavailable.", "SANDBOX_ONLY", 0))
-	var res: InvoResult = await server.create_checkout(player_email, usd_amount)
+##
+## In production the session comes from YOUR checkout endpoint
+## (invonetwork/config/checkout_session_endpoint), which receives
+## {player_email, usd_amount} and returns {checkout_url}, as in the Unity SDK.
+func open_checkout(p_email: String, usd_amount: Variant) -> InvoResult:
+	var res: InvoResult
+	if environment == "production" and not _mock_enabled:
+		var endpoint: String = str(ProjectSettings.get_setting(SETTING_CHECKOUT_ENDPOINT, "")).strip_edges()
+		if endpoint.is_empty():
+			return InvoResult.failure(InvoError.make(
+					"Real-money purchases need a server endpoint: set " +
+					"invonetwork/config/checkout_session_endpoint.", "NO_CHECKOUT_ENDPOINT", 0))
+		res = await _http.post_url(endpoint, {"player_email": p_email, "usd_amount": usd_amount},
+				{"Authorization": "Bearer %s" % _client.token()} if _client.has_token() else {})
+	else:
+		var server: InvoSandboxServer = sandbox()
+		if server == null:
+			return InvoResult.failure(InvoError.make(
+					"Direct sandbox mode unavailable.", "SANDBOX_ONLY", 0))
+		res = await server.create_checkout(p_email, usd_amount)
 	if res.ok:
 		var url: String = str(res.dict().get("checkout_url", ""))
 		# Scheme allowlist: only ever hand https URLs to the OS. A tampered

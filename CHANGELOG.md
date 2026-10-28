@@ -2,6 +2,35 @@
 
 All notable changes to the INVO Godot SDK. Versioning follows [SemVer](https://semver.org/); the API surface tracks the INVO backend and mirrors the [web (npm)](https://www.npmjs.com/package/@invonetwork/web-sdk) and [Python (PyPI)](https://pypi.org/project/invonetwork/) SDKs (currently v2.4.1 parity).
 
+## [0.5.0] — 2026-10-28
+
+The wallet window and editor dock now match the Unity SDK.
+
+### Added
+- **INVO wallet window** (`ui/invo_wallet.tscn`, `InvoWallet`): Store (Top up packs through hosted
+  checkout; Items from your catalog with a confirm sheet), Send and Transfer (details, review, approve on
+  your phone, done), Collect, and Phone, with Unity's copy, dark and light palettes, Inter font, icons,
+  1920x1080 reference scaling and SANDBOX mark. `open(panel)`, `close()`, `toggle()`, F8.
+- **Phone approval by QR** (`InvoApprovalView`), including the first-time "Set up INVO on this phone?"
+  match code, holds and Unity's outcome copy. A pure-GDScript QR encoder (`InvoQr`) draws the code.
+- **Wallet API calls** on the player token: `begin_device_approval`, `poll_device_approval`,
+  `confirm_device_enrollment`, `settle_device_approval`, `get_pending_actions`. On the game secret:
+  `get_game_items`, `get_player_destinations`, `change_player_phone`, `create_phone_change_request`,
+  `get_phone_change_request`. All have offline mock routes.
+- **`Invo.commerce()`** routes the wallet's secret-side calls like Unity: direct in the sandbox, through
+  your **Game Server URL** in production. `Invo.open_checkout()` uses your **checkout session endpoint**
+  in production. `Invo.set_active_player()` sets who the wallet acts for.
+- **Editor dock laid out like Unity's settings window**: environment picker, Sandbox / Production /
+  Game & display tabs, key status, test connection, test player (kept out of exports), test purchase and
+  balance, production export check. Separate sandbox and production Game IDs.
+- Player-facing error copy (`InvoPlayerCopy`) word for word from Unity; raw response bodies are never shown.
+- Tests: `api_tests.gd` (101), `qr_tests.gd` (40), `ui_tests.tscn` (22, the whole window end to end on the
+  mock), all in CI.
+
+### Removed
+- `InvoWalletPanel` (`ui/invo_wallet_panel.tscn`). The wallet window replaces it;
+  `invo_wallet_overlay.tscn` now opens the new window.
+
 ## [0.4.0] — 2026-10-27
 
 Open source under MIT, plus the October key changes the other INVO SDKs shipped.

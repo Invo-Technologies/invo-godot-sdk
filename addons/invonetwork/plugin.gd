@@ -16,6 +16,8 @@ func _enter_tree() -> void:
 	_define_setting("invonetwork/config/sandbox_game_id", TYPE_STRING, "")
 	_define_setting("invonetwork/config/production_game_id", TYPE_STRING, "")
 	_define_setting("invonetwork/config/game_id", TYPE_STRING, "")
+	_define_setting("invonetwork/config/game_server_url", TYPE_STRING, "")
+	_define_setting("invonetwork/config/checkout_session_endpoint", TYPE_STRING, "")
 	_define_setting("invonetwork/config/player_token_endpoint", TYPE_STRING, "")
 	_define_setting("invonetwork/sandbox_only/game_secret", TYPE_STRING, "",
 			PROPERTY_HINT_PASSWORD)

@@ -16,11 +16,20 @@ extends RefCounted
 
 var _http: InvoHttp
 var _auth: Dictionary = {}
+var _secret: String = ""
 
 
 func _init(http: InvoHttp, game_secret: String) -> void:
 	_http = http
-	_auth = {"X-Game-Secret-Key": game_secret}
+	_secret = game_secret
+	_auth = {"X-Game-Secret-Key": game_secret} if not game_secret.is_empty() else {}
+
+
+## Replace the auth headers. Used by Invo.commerce() in production, where this
+## class talks to YOUR game server (which attaches the secret) with the
+## player's token instead of the secret.
+func set_auth_headers(headers: Dictionary) -> void:
+	_auth = headers.duplicate()
 
 
 ## A collision-safe client_request_id / idempotency key (128 bits of CSPRNG).
@@ -574,6 +583,97 @@ func get_destinations(source_game_id: Variant, direction: String = "transfer") -
 			if res.ok else res
 
 
+## Titles where the player already plays ("Games you play" tiles), most
+## recent first, with their balance there. NOT filtered like get_destinations:
+## offer only games that also appear there. Idempotent (a POST read).
+## Production: no player-token route — your backend calls this after checking
+## the email is the session's player.
+func get_player_destinations(player_email: String, player_phone: String) -> InvoResult:
+	if not InvoValidate.is_present(player_email):
+		return _fail(InvoError.invalid_input("playerEmail", player_email, "is required"))
+	var phone_err: InvoError = InvoValidate.e164_problem(player_phone, "playerPhone")
+	if phone_err != null:
+		return _fail(phone_err)
+	var res: InvoResult = await _http.post_json("/api/players/destinations",
+			{"email": player_email, "phone": player_phone}, _auth, true)
+	return InvoResult.success(InvoMap.to_player_destinations_result(res.dict())) \
+			if res.ok else res
+
+
+# ---- Store catalog ----
+
+## The store's active items for this game (POST /api/v1/game-items/list),
+## pre-split for the store screen: `featured` (hero, first is_featured),
+## `weekly`, `daily` — see InvoMap.to_game_items_result. Buy one with
+## purchase_item (unit_price = the item's price_usd). This route reads the
+## secret from the BODY (`game_secret`), not the header. Idempotent (a POST
+## read; limited to 100/hour, so cache it). Production: no player-token
+## route — your backend calls it and serves the list to the game.
+func get_game_items() -> InvoResult:
+	var res: InvoResult = await _http.post_json("/api/v1/game-items/list",
+			{"game_secret": _secret}, _auth, true)
+	return InvoResult.success(InvoMap.to_game_items_result(res.dict())) if res.ok else res
+
+
+# ---- Player phone ----
+
+## Change the player's phone. An unsecured account switches at once
+## (status "updated" | "unchanged"; when identity_rekeyed, switch the client
+## to result.player_token). A secured account answers 409
+## err.is_phone_change_requires_verification(): call
+## create_phone_change_request instead. Other refusals the UI branches on:
+## INVALID_PHONE, PHONE_SHARE_APPROVAL_REQUIRED, PENDING_TRANSFERS_TO_OLD_PHONE,
+## PENDING_TRANSFERS_TO_NEW_PHONE, PHONE_UPDATE_UNAVAILABLE, player_not_found.
+## NOT idempotent (rate-limited 5/hour per player). Production: game-secret
+## only — your backend calls it for the session's player.
+func change_player_phone(player_email: String, new_phone: String) -> InvoResult:
+	var input_err: InvoError = _phone_change_problem(player_email, new_phone)
+	if input_err != null:
+		return _fail(input_err)
+	var res: InvoResult = await _http.post_json("/api/sdk/players/phone",
+			{"player_email": player_email, "new_phone": new_phone}, _auth)
+	if not res.ok:
+		res.error.promote_bare_error_token()
+		return res
+	return InvoResult.success(InvoMap.to_phone_change_result(res.dict()))
+
+
+## Start a confirmed phone change: INVO emails the player a code and a link,
+## and they confirm on INVO's page (never in the game). A new request
+## replaces an earlier pending one. Poll get_phone_change_request until
+## is_pending is false. NOT idempotent (sends an email; 5/hour per player).
+## Refusals include PHONE_SAME, PHONE_IN_USE_BY_ANOTHER_PLAYER,
+## PENDING_TRANSFERS_TO_*_PHONE, WALLET_SECURED, PHONE_CHANGE_LOCKED,
+## PHONE_CHANGE_RECOVERY_COOLDOWN, TOO_MANY_CHANGE_REQUESTS (429).
+func create_phone_change_request(player_email: String, new_phone: String) -> InvoResult:
+	var input_err: InvoError = _phone_change_problem(player_email, new_phone)
+	if input_err != null:
+		return _fail(input_err)
+	var res: InvoResult = await _http.post_json("/api/sdk/players/phone/change-requests",
+			{"player_email": player_email, "new_phone": new_phone}, _auth)
+	if not res.ok:
+		res.error.promote_bare_error_token()
+		return res
+	var mapped: Dictionary = InvoMap.to_phone_change_request(res.dict())
+	if str(mapped["change_request_id"]).is_empty():
+		return _fail(InvoError.make(
+				"INVO response was missing the required `change_request_id` field.",
+				"INVALID_RESPONSE", 0, res.dict()))
+	return InvoResult.success(mapped)
+
+
+## A phone change request's status: pending | confirmed | expired |
+## cancelled | refused | denied (new_phone_masked like "***-***-0111").
+## 404 CHANGE_REQUEST_NOT_FOUND also for another game's request. INVO has no
+## cancel route — an unconfirmed request simply expires.
+func get_phone_change_request(change_request_id: String) -> InvoResult:
+	if not InvoValidate.is_present(change_request_id):
+		return _fail(InvoError.invalid_input("changeRequestId", change_request_id, "is required"))
+	var res: InvoResult = await _http.get_json(
+			"/api/sdk/players/phone/change-requests/%s" % change_request_id.uri_encode(), _auth)
+	return InvoResult.success(InvoMap.to_phone_change_request(res.dict())) if res.ok else res
+
+
 # ---- Phone-share OTP handshake (UNAUTHENTICATED, phone-owner-driven) ----
 
 ## Send the fallback phone-share OTP — resolves a 409 PHONE_SHARE_APPROVAL_REQUIRED.
@@ -676,6 +776,12 @@ static func _claim_problem(claim_code: String, player_name: String,
 		if not InvoValidate.is_present(required[label]):
 			return InvoError.invalid_input(label, required[label], "is required")
 	return InvoValidate.e164_problem(player_phone, "playerPhone")
+
+
+static func _phone_change_problem(player_email: String, new_phone: String) -> InvoError:
+	if not InvoValidate.is_present(player_email):
+		return InvoError.invalid_input("playerEmail", player_email, "is required")
+	return InvoValidate.e164_problem(new_phone, "newPhone")
 
 
 static func _fail(err: InvoError) -> InvoResult:

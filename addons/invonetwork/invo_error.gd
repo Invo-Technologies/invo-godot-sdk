@@ -22,6 +22,7 @@ static var _promotable_re: RegEx = null
 static var _insufficient_re: RegEx = null
 static var _not_enrolled_re: RegEx = null
 static var _duplicate_re: RegEx = null
+static var _bare_token_re: RegEx = null
 
 
 static func _regexes() -> void:
@@ -85,6 +86,22 @@ const KEY_FOR_OTHER_ENVIRONMENT_MESSAGE: String = "This key belongs to the other
 
 func _body_object() -> Dictionary:
 	return body if body is Dictionary else {}
+
+
+## Some routes answer with only a bare `error` token and no `code` (the RFC
+## 8628 device-approval errors such as invalid_grant, and player_not_found).
+## When `code` is empty and `error` is a bare token (letters, digits, _; <= 64
+## chars, not a sentence), copy it into `code` so callers can branch on it —
+## the Unity SDK's `code ?? error_code ?? bare error` rule. Returns self.
+func promote_bare_error_token() -> InvoError:
+	if not code.is_empty():
+		return self
+	if _bare_token_re == null:
+		_bare_token_re = RegEx.create_from_string("^[A-Za-z0-9_]{1,64}\\z")
+	var e: Variant = _body_object().get("error")
+	if e is String and _bare_token_re.search(e) != null:
+		code = e
+	return self
 
 
 func _to_string() -> String:
@@ -198,6 +215,23 @@ func retry_after_at() -> String:
 	if s.strip_edges().is_valid_float():
 		return ""  # numeric string -> that's the throttle field
 	return s
+
+
+## HTTP 429 throttle (any route). Hold the button for retry_after_seconds().
+func is_rate_limited() -> bool:
+	return status == 429
+
+
+## 409 on change_player_phone: the player secured their phone, so the change
+## needs their own confirmation — call create_phone_change_request instead.
+func is_phone_change_requires_verification() -> bool:
+	return code == "PHONE_CHANGE_REQUIRES_VERIFICATION"
+
+
+## 409 on begin_device_approval: the player already approved a grant for this
+## transaction and it is finishing. Wait, or settle the approved grant.
+func is_device_approval_already_pending() -> bool:
+	return code == "DEVICE_APPROVAL_ALREADY_PENDING"
 
 
 ## Idempotency-keyed duplicate (item purchase -> 409).

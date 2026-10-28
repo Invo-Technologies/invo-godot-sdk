@@ -57,18 +57,34 @@ if not purchase.ok and purchase.error.is_insufficient_balance():
 
 Every call returns an `InvoResult` (`ok` / `data` / `error: InvoError`). `InvoError` carries the backend's stable `code`, HTTP `status`, raw `body`, `request_id`, and the same classifiers as the official SDKs (`is_insufficient_balance()`, `is_phone_share_approval_required()`, `is_steam_value_non_transferable()`, `is_token_expired()`, …).
 
-## Drop-in UI
+## Drop-in UI: the INVO wallet window
 
-- `addons/invonetwork/ui/invo_wallet_panel.tscn` — a wallet `Control` you can instance in any menu: balance, add-funds (hosted checkout), claim code, send-to-player.
-- `addons/invonetwork/ui/invo_wallet_overlay.tscn` — zero-integration overlay; add as an autoload and press **F8** in game (define the `invo_wallet_toggle` action to rebind).
+The same wallet as the Unity SDK, with the same screens, copy, dark and light themes, Inter font and approval flow:
 
-With no credentials configured, debug builds fall back to an **offline mock** so you can try the UI immediately; wire real credentials in the dock when ready.
+- **Store**: *Top up* (FEATURED, PACKS, DAILY DEALS from your INVO game items, paid in the browser through INVO's hosted checkout) and *Items* (your catalog, paid from the in-game balance with a confirm sheet).
+- **Send**: to another player's phone, in this game or another (recent recipients, searchable game picker), then review, approve on your phone by QR, done.
+- **Transfer**: move the player's own balance to another game, with the same four steps.
+- **Collect**: what's waiting for the player, approved on their phone.
+- **Phone**: the number that approves sends; secured accounts confirm a change from an email link.
+
+```gdscript
+var wallet: InvoWallet = preload("res://addons/invonetwork/ui/invo_wallet.tscn").instantiate()
+add_child(wallet)
+Invo.set_active_player(player.email, player.phone, player.name)   # once, after your login
+wallet.set_item_catalog([{"item_id": "sword_01", "name": "Ember Sword", "price": 250}])
+wallet.open("Store")            # or "Send", "Transfer", "Collect", "Phone"; F8 toggles
+```
+
+`light_theme = true` switches palettes; `InvoUiTheme.build(your_palette)` re-skins it. `invo_wallet_overlay.tscn` is the same window for adding as an autoload. With no credentials configured, debug builds use an **offline mock** so every flow works immediately, and in the sandbox a SANDBOX mark and a test sign-in form appear (never in release builds).
 
 ## Production integration
 
-In production the game holds only a player token, so the client mode covers the **reads** (balance, destinations, pending-collect) and login. The **actions** — checkout creation, item purchase, sends, claims — run on your backend with the game secret, exactly like the Unity/Unreal plugins. The wallet panel's buy/claim/send buttons therefore work out of the box in sandbox mode only; in production, route those actions through your own endpoints (pattern below) or hand off to INVO's hosted pages.
+In production the game holds only a player token. Phone approvals (begin, poll, settle), balance, destinations and the Collect list use that token directly. Everything that needs the game secret (the store list, item purchases, starting a send or transfer, phone changes) goes through **your game server**, exactly like the Unity SDK:
 
-Your backend needs two endpoints (sketch, Python server SDK — the JS SDK is equivalent):
+- **Game Server URL** (`invonetwork/config/game_server_url`): the wallet sends INVO's own `/api/...` paths there with `Authorization: Bearer <player token>`. Your server checks the player, attaches your production key (`X-Game-Secret-Key`; for `/api/v1/game-items/list` also `game_secret` in the body), sets item prices from your own catalog (INVO charges the price it is sent), and forwards to `https://invo.network`.
+- **Checkout session endpoint** (`invonetwork/config/checkout_session_endpoint`): takes `{player_email, usd_amount}` and returns `{checkout_url}` for real-money top-ups.
+
+Your backend also needs these endpoints (sketch, Python server SDK; the JS SDK is equivalent):
 
 ```python
 from invonetwork import InvoServer
@@ -94,7 +110,7 @@ Point `invonetwork/config/player_token_endpoint` at `/invo/token`, call `Invo.lo
 
 - **Webhook verification** — webhooks terminate on your backend; verify and credit there (see above). A game client can't hold the HMAC secret.
 - **Passkey (WebAuthn) ceremonies** — a browser capability. Approve/claim ceremonies hand off to INVO's hosted pages / your web companion.
-- **Production checkout/purchase/send/claim calls** — require the game secret, which never ships in a build; client mode deliberately has no endpoints for them.
+- **Production checkout/purchase/send/claim calls straight to INVO**: they need the game secret, which never ships in a build, so the wallet sends them to your game server instead (above).
 - **Steam in-client purchase rail** — dedicated endpoints, not yet ported (`purchase_currency` rejects `rail="steam"` with guidance). On the roadmap.
 
 ## Transport semantics (ported from the official SDKs)
@@ -107,7 +123,10 @@ Point `invonetwork/config/player_token_endpoint` at `/invo/token`, call `Invo.lo
 ## Tests
 
 ```bash
-godot --headless --script res://tests/run_tests.gd
+godot --headless --script res://tests/run_tests.gd   # core
+godot --headless --script res://tests/api_tests.gd   # wallet API calls
+godot --headless --script res://tests/qr_tests.gd    # QR encoder
+godot --headless res://tests/ui_tests.tscn           # wallet window, end to end on the mock
 ```
 
 ## Status / roadmap
@@ -119,8 +138,9 @@ godot --headless --script res://tests/run_tests.gd
 - [ ] Sample backend companion (token mint + webhook, Python/JS)
 - [ ] Steam in-client purchase rail
 - [ ] C# bindings
-- [ ] Asset Library listing (submitted with 0.4.0)
+- [x] Wallet window matching the Unity SDK (Store, Send, Transfer, Collect, Phone; QR phone approval)
+- [ ] Asset Library listing (submitted with 0.5.0)
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Copyright (c) 2026 INVO Tech Inc.
+MIT. See [LICENSE](LICENSE). Copyright (c) 2026 INVO Tech Inc. The bundled Inter font is under the SIL Open Font License (`addons/invonetwork/ui/art/Inter-OFL.txt`).

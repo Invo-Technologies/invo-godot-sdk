@@ -38,5 +38,14 @@ jobs:
       - name: Import project (builds the script class cache)
         run: ~/godot-bin/godot --headless --import
 
-      - name: Run test suite
+      - name: Core tests
         run: ~/godot-bin/godot --headless --script res://tests/run_tests.gd
+
+      - name: API tests
+        run: ~/godot-bin/godot --headless --script res://tests/api_tests.gd
+
+      - name: QR encoder tests
+        run: ~/godot-bin/godot --headless --script res://tests/qr_tests.gd
+
+      - name: Wallet UI tests (mock, end to end)
+        run: ~/godot-bin/godot --headless res://tests/ui_tests.tscn

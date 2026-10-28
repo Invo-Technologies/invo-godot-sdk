@@ -161,6 +161,16 @@ func _build_production_tab() -> VBoxContainer:
 			"Invo.login_via_backend(payload) POSTs your payload here as JSON. Your server calls " +
 			"mint_player_token with the INVO Python or JS server SDK and returns the token.",
 			Note.NONE))
+	var server_url: LineEdit = _line(InvoScript.SETTING_GAME_SERVER_URL, "https://api.yourgame.com")
+	server_url.tooltip_text = "Base URL of your server, which forwards /api/* to INVO with your production key."
+	v.add_child(_field_row("Game Server URL", server_url))
+	var checkout: LineEdit = _line(InvoScript.SETTING_CHECKOUT_ENDPOINT, "https://api.yourgame.com/invo/checkout")
+	checkout.tooltip_text = "Your endpoint that mints a hosted-checkout session and returns { checkout_url }."
+	v.add_child(_field_row("Checkout session endpoint", checkout))
+	v.add_child(_note(
+			"The wallet window's store, send, transfer and phone calls go to your Game Server URL " +
+			"with the player's token; your server checks the player and attaches the key.",
+			Note.NONE))
 
 	v.add_child(_heading("Production export check"))
 	_export_check = VBoxContainer.new()
