@@ -36,6 +36,7 @@ func _run_all() -> void:
 	_test_header_sanitization()
 	_test_large_value_decimal_bug()
 	_test_request_id_generation()
+	_test_key_environment()
 	print("\n[tests] %d passed, %d failed" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
 
@@ -375,3 +376,17 @@ func _test_token_refresh() -> void:
 	_check(res.ok and state["mints"] == 1 and client.token() == "fresh-token",
 			"SDK_TOKEN_EXPIRED triggers one re-mint and a retry")
 	http.queue_free()
+
+
+# ---- Key environments (0.4.0) ----
+
+func _test_key_environment() -> void:
+	var err: InvoError = InvoError.from_response(401, {"error": "Unauthorized", "code": "KEY_FOR_OTHER_ENVIRONMENT"})
+	_check(err.is_key_for_other_environment(), "401 KEY_FOR_OTHER_ENVIRONMENT is classified")
+	_check(err.message == InvoError.KEY_FOR_OTHER_ENVIRONMENT_MESSAGE, "wrong-environment key gets the clear message")
+	_check(not InvoError.from_response(401, {"error": "bad key", "code": "INVALID_KEY"}).is_key_for_other_environment(),
+			"other 401s are not wrong-environment")
+	var dock: GDScript = load("res://addons/invonetwork/dock/invo_dock.gd")
+	_check(dock.is_live_key("ivsdk_live_abc"), "ivsdk_live_ key is flagged as live")
+	_check(not dock.is_live_key("ivsdk_test_abc") and not dock.is_live_key("ivsdk_abc"),
+			"sandbox and older keys are not flagged as live")

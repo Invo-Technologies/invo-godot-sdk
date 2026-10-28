@@ -72,7 +72,15 @@ static func from_response(p_status: int, p_body: Variant, p_request_id: String =
 			c = d["error"]
 	elif p_body is String and not (p_body as String).strip_edges().is_empty():
 		msg = p_body
+	if c == "KEY_FOR_OTHER_ENVIRONMENT":
+		msg = KEY_FOR_OTHER_ENVIRONMENT_MESSAGE
 	return make(msg, c, p_status, p_body, p_request_id)
+
+
+## Shown when a sandbox key reaches production or the other way round (HTTP 401).
+const KEY_FOR_OTHER_ENVIRONMENT_MESSAGE: String = "This key belongs to the other Invo environment. " \
+		+ "Check sandbox/production in Project Settings > invonetwork/config/environment: sandbox keys " \
+		+ "start with ivsdk_test_ and production keys (kept on your game server) with ivsdk_live_."
 
 
 func _body_object() -> Dictionary:
@@ -95,6 +103,11 @@ func is_receiver_not_enrolled() -> bool:
 ## The session/SDK token expired — re-mint and retry.
 func is_token_expired() -> bool:
 	return code == "SDK_TOKEN_EXPIRED"
+
+
+## A sandbox key was sent to production, or a production key to the sandbox.
+func is_key_for_other_environment() -> bool:
+	return code == "KEY_FOR_OTHER_ENVIRONMENT"
 
 
 func is_enrollment_authorization_required() -> bool:

@@ -2,6 +2,24 @@
 
 All notable changes to the INVO Godot SDK. Versioning follows [SemVer](https://semver.org/); the API surface tracks the INVO backend and mirrors the [web (npm)](https://www.npmjs.com/package/@invonetwork/web-sdk) and [Python (PyPI)](https://pypi.org/project/invonetwork/) SDKs (currently v2.4.1 parity).
 
+## [0.4.0] — 2026-10-27
+
+Open source under MIT, plus the October key changes the other INVO SDKs shipped.
+
+### Changed
+- **Licensed under MIT** (was proprietary), so the plugin can ship on the Godot Asset Library.
+- Sandbox keys now start with `ivsdk_test_`; older `ivsdk_` keys keep working. The sandbox console is
+  `https://console.invo.network/test`.
+- CI runs on Godot 4.7.2.
+
+### Added
+- **A clear message for a key sent to the wrong environment.** A 401 `KEY_FOR_OTHER_ENVIRONMENT` now
+  reads "This key belongs to the other Invo environment…", and `InvoError.is_key_for_other_environment()`
+  lets games branch on it.
+- **Live keys are flagged in the editor dock.** A key starting with `ivsdk_live_` in the sandbox-secret
+  slot shows a warning, and the dock's **Test** button refuses it: production keys belong on your game
+  server only.
+
 ## [0.3.0] — 2026-07-15
 
 Second audit pass: export-time secret guard, PII redaction, idempotency-key

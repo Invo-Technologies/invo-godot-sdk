@@ -40,8 +40,17 @@ func _on_save() -> void:
 			_secret.text.strip_edges())
 	var err: Error = ProjectSettings.save()
 	_status.text = "Saved." if err == OK else "Save failed (%d)." % err
-	if not _secret.text.strip_edges().is_empty():
+	var secret: String = _secret.text.strip_edges()
+	if is_live_key(secret):
+		_status.text += "\n⚠ Live key: production keys belong on your game server only. " \
+				+ "Use a sandbox key (ivsdk_test_…) here, from console.invo.network/test."
+	elif not secret.is_empty():
 		_status.text += "\n⚠ Sandbox secret set — dev only. Never ship it in a build."
+
+
+## Production keys start with ivsdk_live_; sandbox keys with ivsdk_test_ (older ones: ivsdk_).
+static func is_live_key(key: String) -> bool:
+	return key.begins_with("ivsdk_live_")
 
 
 func _on_test() -> void:
@@ -51,6 +60,10 @@ func _on_test() -> void:
 		return
 	if _secret.text.strip_edges().is_empty():
 		_status.text = "Set the sandbox game secret first."
+		return
+	if is_live_key(_secret.text.strip_edges()):
+		_status.text = "✘ That's a live key. Production keys belong on your game server only; " \
+				+ "test with a sandbox key (ivsdk_test_…) from console.invo.network/test."
 		return
 	_status.text = "Testing sandbox connection..."
 	var http: InvoHttp = InvoHttp.new()

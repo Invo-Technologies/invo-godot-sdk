@@ -6,9 +6,13 @@ First-party-style **Godot 4.x** plugin for [INVO Network](https://docs.invo.netw
 
 ## Install
 
+**From the Asset Library:** in the Godot editor open the **AssetLib** tab, search for **INVO Network**, then download and install it (keep only `addons/invonetwork/` checked).
+
+**Manually:**
+
 1. Copy `addons/invonetwork/` into your project.
 2. Enable **INVO Network** in *Project Settings → Plugins*. This registers the `Invo` autoload and the INVO dock.
-3. Configure in the **INVO dock** (or *Project Settings → Invonetwork*): environment (`sandbox`/`production`), your game ID, and either your backend's player-token endpoint (production) or your sandbox game secret (prototyping).
+3. Configure in the **INVO dock** (or *Project Settings → Invonetwork*): environment (`sandbox`/`production`), your game ID, and either your backend's player-token endpoint (production) or your sandbox game secret (prototyping). Sandbox keys come from [console.invo.network/test](https://console.invo.network/test) and start with `ivsdk_test_` (older `ivsdk_` keys still work). Production keys (`ivsdk_live_`) belong on your game server only, never in the game.
 
 ## The two modes — and the one security rule
 
@@ -115,4 +119,8 @@ godot --headless --script res://tests/run_tests.gd
 - [ ] Sample backend companion (token mint + webhook, Python/JS)
 - [ ] Steam in-client purchase rail
 - [ ] C# bindings
-- [ ] Asset Library listing
+- [ ] Asset Library listing (submitted with 0.4.0)
+
+## License
+
+MIT. See [LICENSE](LICENSE). Copyright (c) 2026 INVO Tech Inc.

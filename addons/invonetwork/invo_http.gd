@@ -19,7 +19,7 @@ signal request_errored(method: String, url: String, error: InvoError, will_retry
 const DEFAULT_TIMEOUT: float = 30.0
 const MAX_RETRY_AFTER: float = 20.0
 const RETRIABLE_STATUS: Array[int] = [429, 500, 502, 503, 504]
-const USER_AGENT: String = "invonetwork-godot-sdk/0.3.0 (+https://invo.network)"
+const USER_AGENT: String = "invonetwork-godot-sdk/0.4.0 (+https://invo.network)"
 
 var base_url: String = ""
 var timeout: float = DEFAULT_TIMEOUT
