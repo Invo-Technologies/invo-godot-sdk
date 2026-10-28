@@ -7,3 +7,4 @@
 /.gitignore export-ignore
 *.png binary
 /icon.png.import export-ignore
+/docs export-ignore
