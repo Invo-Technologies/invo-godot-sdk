@@ -29,7 +29,12 @@ signal balance_updated(balance: Dictionary)
 signal checkout_opened(url: String)
 
 const SETTING_ENVIRONMENT: String = "invonetwork/config/environment"
+## Older single Game ID, used when the per-environment one is empty.
 const SETTING_GAME_ID: String = "invonetwork/config/game_id"
+const SETTING_SANDBOX_GAME_ID: String = "invonetwork/config/sandbox_game_id"
+const SETTING_PRODUCTION_GAME_ID: String = "invonetwork/config/production_game_id"
+## Game name, icons, currency name and version shown in the wallet UI.
+const SETTING_DISPLAY_PREFIX: String = "invonetwork/display/"
 const SETTING_TOKEN_ENDPOINT: String = "invonetwork/config/player_token_endpoint"
 const SETTING_SANDBOX_SECRET: String = "invonetwork/sandbox_only/game_secret"
 const SECRET_ENV_VAR: String = "INVO_SANDBOX_SECRET"
@@ -54,8 +59,22 @@ func _ready() -> void:
 	add_child(_http)
 	_http.request_errored.connect(_on_request_errored)
 	var env: String = str(ProjectSettings.get_setting(SETTING_ENVIRONMENT, "sandbox"))
-	var gid: String = str(ProjectSettings.get_setting(SETTING_GAME_ID, ""))
-	setup(env, gid)
+	setup(env, configured_game_id(env))
+
+
+## The Game ID for an environment: sandbox and production are separate INVO
+## environments with separate Game IDs. Falls back to the older single setting.
+static func configured_game_id(env: String) -> String:
+	var setting: String = SETTING_PRODUCTION_GAME_ID if env == "production" 			else SETTING_SANDBOX_GAME_ID
+	var gid: String = str(ProjectSettings.get_setting(setting, "")).strip_edges()
+	return gid if not gid.is_empty() 			else str(ProjectSettings.get_setting(SETTING_GAME_ID, "")).strip_edges()
+
+
+## A display setting (game_name, game_icon_url, currency_name,
+## currency_icon_url, game_version), or `fallback` when unset.
+static func display_setting(key: String, fallback: String = "") -> String:
+	var v: String = str(ProjectSettings.get_setting(SETTING_DISPLAY_PREFIX + key, "")).strip_edges()
+	return v if not v.is_empty() else fallback
 
 
 ## Configure (or re-configure) the SDK. Called automatically from project

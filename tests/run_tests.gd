@@ -37,6 +37,7 @@ func _run_all() -> void:
 	_test_large_value_decimal_bug()
 	_test_request_id_generation()
 	_test_key_environment()
+	_test_dock_checks()
 	print("\n[tests] %d passed, %d failed" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
 
@@ -390,3 +391,26 @@ func _test_key_environment() -> void:
 	_check(dock.is_live_key("ivsdk_live_abc"), "ivsdk_live_ key is flagged as live")
 	_check(not dock.is_live_key("ivsdk_test_abc") and not dock.is_live_key("ivsdk_abc"),
 			"sandbox and older keys are not flagged as live")
+
+
+# ---- Editor dock (0.4.0, same checks as the Unity settings window) ----
+
+func _test_dock_checks() -> void:
+	var dock: GDScript = load("res://addons/invonetwork/dock/invo_dock.gd")
+	_check(dock.key_status("") == "Not set" and dock.key_status(" ivsdk_test_a") == "Has spaces"
+			and dock.key_status("ivsdk_live_a") == "Live key" and dock.key_status("ivsdk_test_a") == "Looks valid"
+			and dock.key_status("sk_123") == "Not ivsdk_", "dock key status matches the Unity labels")
+	_check(dock.production_problems("42", "https://api.example.com/token", "").is_empty(),
+			"complete production config has no problems")
+	var problems: PackedStringArray = dock.production_problems("", "http://api.example.com", "ivsdk_test_a")
+	_check(problems.size() == 3, "missing Game ID, http endpoint and saved key are all reported")
+	_check(dock.describe_failure(InvoError.from_response(401, {"code": "KEY_FOR_OTHER_ENVIRONMENT"}))
+			== InvoError.KEY_FOR_OTHER_ENVIRONMENT_MESSAGE, "test-connection failure explains a wrong-environment key")
+	var invo: GDScript = load("res://addons/invonetwork/invo.gd")
+	ProjectSettings.set_setting("invonetwork/config/game_id", "7")
+	ProjectSettings.set_setting("invonetwork/config/sandbox_game_id", "")
+	ProjectSettings.set_setting("invonetwork/config/production_game_id", "99")
+	_check(invo.configured_game_id("sandbox") == "7", "sandbox falls back to the older single Game ID")
+	_check(invo.configured_game_id("production") == "99", "production uses its own Game ID")
+	ProjectSettings.set_setting("invonetwork/config/production_game_id", "")
+	ProjectSettings.set_setting("invonetwork/config/game_id", "")
